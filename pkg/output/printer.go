@@ -15,6 +15,7 @@ import (
 // Result contains all data to be presented in the output
 type Result struct {
 	Target          string
+	ServiceName     string
 	Namespace       string
 	Duration        time.Duration
 	RPS             int
@@ -41,7 +42,10 @@ func printText(r Result) {
 	peakCPU, peakMemory := metrics.CalculatePeakMetrics(r.Metrics)
 
 	fmt.Println("\n===== Pod Rightsizer Results =====")
-	fmt.Printf("\nTarget: %s\n", r.Target)
+	fmt.Printf("\nLoad Test Target: %s\n", r.Target)
+	if r.ServiceName != r.Target {
+		fmt.Printf("Service Name: %s\n", r.ServiceName)
+	}
 	fmt.Printf("Namespace: %s\n", r.Namespace)
 	fmt.Printf("Load test: %d RPS for %s\n", r.RPS, r.Duration)
 
@@ -86,10 +90,11 @@ func printJSON(r Result) {
 
 	// Create a map with the relevant data
 	data := map[string]interface{}{
-		"target":    r.Target,
-		"namespace": r.Namespace,
-		"duration":  r.Duration.String(),
-		"rps":       r.RPS,
+		"loadTestTarget": r.Target,
+		"serviceName":    r.ServiceName,
+		"namespace":      r.Namespace,
+		"duration":       r.Duration.String(),
+		"rps":            r.RPS,
 		"current": map[string]interface{}{
 			"cpuRequest":    fmt.Sprintf("%.0fm", r.CurrentSettings.CPURequest*1000),
 			"cpuLimit":      fmt.Sprintf("%.0fm", r.CurrentSettings.CPULimit*1000),
@@ -176,7 +181,7 @@ spec:
             memory: "%dMi"
 `,
 		r.Namespace,
-		extractResourceName(r.Target),
+		extractResourceName(r.ServiceName),
 		int(r.Recommendations.CPURequest*1000),
 		int(r.Recommendations.MemoryRequest),
 		int(r.Recommendations.CPULimit*1000),

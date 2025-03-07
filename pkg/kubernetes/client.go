@@ -169,39 +169,8 @@ func (c *Client) GetPodMetrics(ctx context.Context, namespace, target string) (f
 	return avgCPU, avgMemory, nil
 }
 
-// GenerateYAMLPatch creates a YAML patch for the deployment
-func (c *Client) GenerateYAMLPatch(namespace, target string, recommendations ResourceSettings) (string, error) {
-	// This is a simplified version that creates a basic patch
-	// In a real implementation, this would identify the specific deployment and create a proper patch
-
-	patch := fmt.Sprintf(`apiVersion: apps/v1
-kind: Deployment
-metadata:
-  namespace: %s
-  name: %s
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        resources:
-          requests:
-            cpu: "%dm"
-            memory: "%dMi"
-          limits:
-            cpu: "%dm"
-            memory: "%dMi"
-`,
-		namespace,
-		extractResourceName(target),
-		int(recommendations.CPURequest*1000),
-		int(recommendations.MemoryRequest),
-		int(recommendations.CPULimit*1000),
-		int(recommendations.MemoryLimit),
-	)
-
-	return patch, nil
-}
+// Note: YAML patch generation functionality has been centralized in the output package
+// to avoid code duplication. The generateYAMLPatch function there handles this functionality.
 
 // Helper functions
 

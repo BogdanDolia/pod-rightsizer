@@ -176,6 +176,46 @@ If you're having issues with connectivity or metrics collection:
 - Verify the metrics server is running in your cluster
 - Increase verbosity by redirecting stderr to a file for detailed error messages
 
+## Building and Pushing Docker Image
+
+To run pod-rightsizer as a Kubernetes job, you'll need to build and push a Docker image:
+
+```bash
+# Build the Docker image
+docker build -t yourusername/pod-rightsizer:latest .
+
+# Login to Docker Hub (or your preferred registry)
+docker login
+
+# Push the image
+docker push yourusername/pod-rightsizer:latest
+```
+
+## Running as a Kubernetes Job
+
+A sample Kubernetes job definition is provided in `pod-rightsizer-job.yaml`. This includes:
+
+1. A Job resource to run pod-rightsizer
+2. A ServiceAccount with necessary permissions
+3. RBAC Role and RoleBinding to allow metrics collection
+
+To use it:
+
+1. Edit `pod-rightsizer-job.yaml` to change the target service, namespace, and other parameters
+2. Apply the YAML to your cluster:
+
+```bash
+kubectl apply -f pod-rightsizer-job.yaml
+```
+
+3. Monitor the job:
+
+```bash
+kubectl logs job/pod-rightsizer -f
+```
+
+The job will analyze the specified service and output resource recommendations, which you can then apply to your deployment.
+
 ## License
 
 MIT

@@ -75,20 +75,32 @@ func (t *Tester) runRPSTest(ctx context.Context, duration time.Duration) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
+	// Record the start time of the test
+	testStartTime := time.Now()
+
 	// Collect and process results
 	go func() {
 		defer wg.Done()
 		defer close(resultsDone)
 
 		var metrics Metrics
+		// Initialize metrics with the test start time
+		metrics.StartTime = testStartTime
+		metrics.TestDuration = duration // Store the intended duration
 
 		for {
 			select {
 			case <-testCtx.Done():
+				// Record end time when context is done
+				metrics.EndTime = time.Now()
 				return
 			case result, ok := <-resultsChan:
 				if !ok {
-					// Print final metrics
+					// Record end time and print final metrics
+					metrics.EndTime = time.Now()
+					// Calculate actual test duration
+					metrics.TestDuration = metrics.EndTime.Sub(metrics.StartTime)
+					fmt.Printf("Test took %s (expected %s)\n", metrics.TestDuration.Round(time.Millisecond), duration)
 					metrics.PrintSummary()
 					return
 				}
@@ -257,20 +269,32 @@ func (t *Tester) runConcurrentTest(ctx context.Context, duration time.Duration) 
 	var wg sync.WaitGroup
 	wg.Add(1)
 
+	// Record the start time of the test
+	testStartTime := time.Now()
+
 	// Collect and process results
 	go func() {
 		defer wg.Done()
 		defer close(resultsDone)
 
 		var metrics Metrics
+		// Initialize metrics with the test start time
+		metrics.StartTime = testStartTime
+		metrics.TestDuration = duration // Store the intended duration
 
 		for {
 			select {
 			case <-testCtx.Done():
+				// Record end time when context is done
+				metrics.EndTime = time.Now()
 				return
 			case result, ok := <-resultsChan:
 				if !ok {
-					// Print final metrics
+					// Record end time and print final metrics
+					metrics.EndTime = time.Now()
+					// Calculate actual test duration
+					metrics.TestDuration = metrics.EndTime.Sub(metrics.StartTime)
+					fmt.Printf("Test took %s (expected %s)\n", metrics.TestDuration.Round(time.Millisecond), duration)
 					metrics.PrintSummary()
 					return
 				}
@@ -447,6 +471,9 @@ type Metrics struct {
 	Failures     int
 	StatusCodes  map[int]int
 	TotalLatency time.Duration
+	StartTime    time.Time     // When the test started
+	EndTime      time.Time     // When the test ended
+	TestDuration time.Duration // Actual duration of the test
 	MinLatency   time.Duration
 	MaxLatency   time.Duration
 	Latencies    []time.Duration
@@ -537,11 +564,28 @@ func (m *Metrics) P95Latency() time.Duration {
 
 // Throughput calculates requests per second
 func (m *Metrics) Throughput() float64 {
-	if m.Requests == 0 || m.TotalLatency == 0 {
+	if m.Requests == 0 {
 		return 0
 	}
 
-	return float64(m.Requests) / m.TotalLatency.Seconds()
+	// If we have test duration recorded, use it (more accurate)
+	if m.TestDuration > 0 {
+		return float64(m.Requests) / m.TestDuration.Seconds()
+	}
+
+	// If we have start and end time, calculate duration from that
+	if !m.StartTime.IsZero() && !m.EndTime.IsZero() {
+		duration := m.EndTime.Sub(m.StartTime)
+		return float64(m.Requests) / duration.Seconds()
+	}
+
+	// Fallback to the original calculation (less accurate)
+	if m.TotalLatency > 0 {
+		fmt.Fprintf(os.Stderr, "Warning: Using less accurate throughput calculation based on total latency.\n")
+		return float64(m.Requests) / m.TotalLatency.Seconds()
+	}
+
+	return 0
 }
 
 // PrintSummary prints a summary of the metrics to stdout
@@ -553,6 +597,13 @@ func (m *Metrics) PrintSummary() {
 	fmt.Fprintf(os.Stdout, "Failed Requests: %d\n", m.Failures)
 	fmt.Fprintf(os.Stdout, "Success Rate: %.2f%%\n", m.SuccessRate())
 
+	// Add test duration information
+	if !m.StartTime.IsZero() && !m.EndTime.IsZero() {
+		fmt.Fprintf(os.Stdout, "Test Duration: %s\n", m.EndTime.Sub(m.StartTime).Round(time.Millisecond))
+	} else if m.TestDuration > 0 {
+		fmt.Fprintf(os.Stdout, "Test Duration: %s\n", m.TestDuration.Round(time.Millisecond))
+	}
+
 	if m.Requests > 0 {
 		fmt.Fprintf(os.Stdout, "Mean Latency: %.2fms\n", float64(m.MeanLatency().Microseconds())/1000.0)
 
@@ -560,7 +611,15 @@ func (m *Metrics) PrintSummary() {
 			fmt.Fprintf(os.Stdout, "Min Latency: %.2fms\n", float64(m.MinLatency.Microseconds())/1000.0)
 		}
 		fmt.Fprintf(os.Stdout, "Max Latency: %.2fms\n", float64(m.MaxLatency.Microseconds())/1000.0)
-		fmt.Fprintf(os.Stdout, "Throughput: %.2f req/s\n", m.Throughput())
+
+		// Show both total requests and RPS
+		throughput := m.Throughput()
+		fmt.Fprintf(os.Stdout, "Throughput: %.2f req/s (based on test duration)\n", throughput)
+
+		// Show expected RPS for comparison if different
+		if m.TestDuration > 0 && int(throughput) != int(float64(m.Requests)/m.TestDuration.Seconds()) {
+			fmt.Fprintf(os.Stdout, "Expected RPS: %.2f req/s\n", float64(m.Requests)/m.TestDuration.Seconds())
+		}
 	}
 
 	fmt.Fprintf(os.Stdout, "\nStatus Code Distribution:\n")

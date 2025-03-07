@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pod-rightsizer-002
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 1
+  template:
+    spec:
+      serviceAccountName: pod-rightsizer-sa
+      containers:
+      - name: pod-rightsizer
+        image: crcoerph/pod-rightsizer:0.0.1-arm64
+        imagePullPolicy: Always
+        command:
+        - /pod-rightsizer
+        args:
+        - --target=http://nginx.default.svc.cluster.local
+        - --service-name=nginx
+        - --namespace=default
+        - --duration=5m
+        - --rps=500
+        - --margin=20
+        - --output-format=text
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      restartPolicy: Never
+---
+# Service Account with required permissions
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-rightsizer-sa
+  namespace: default
+---
+# Role with permissions to get pod metrics and read/update deployments
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-rightsizer-role
+  namespace: default
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "patch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+# Role binding to connect service account with role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-rightsizer-rolebinding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: pod-rightsizer-sa
+  namespace: default
+roleRef:
+  kind: Role
+  name: pod-rightsizer-role
+  apiGroup: rbac.authorization.k8s.io

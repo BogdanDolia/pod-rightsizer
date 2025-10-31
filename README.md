@@ -219,3 +219,48 @@ The job will analyze the specified service and output resource recommendations, 
 ## License
 
 MIT
+
+## Advisor API (MVP)
+
+A lightweight HTTP service to orchestrate a short load test, collect Kubernetes metrics and produce recommendations + ready‑to‑apply YAML.
+
+### Run locally (Windows/macOS/Linux)
+
+```bash
+go run ./cmd/advisor-api
+# or build
+go build -o advisor-api ./cmd/advisor-api && ./advisor-api
+# PORT can be set via env (default 8080)
+```
+
+Requires access to your cluster via kubeconfig (`$HOME/.kube/config`) or in‑cluster config if running inside Kubernetes.
+
+Open `http://localhost:8080/` for a minimal UI.
+
+### API
+
+- POST `/api/analyze`
+  - body:
+  ```json
+  {
+    "namespace": "default",
+    "deployment": "my-deployment",
+    "serviceName": "my-service",
+    "duration": "60s",
+    "rps": 50,
+    "concurrency": 0,
+    "margin": 20,
+    "targetURL": "http://localhost:8080"
+  }
+  ```
+  - response: `{ "runId": "..." }`
+
+- GET `/api/runs/{id}` — status, metrics count, recommendations and advice
+- GET `/api/runs/{id}/yaml-patch` — YAML patch with requests/limits
+- GET `/api/runs/{id}/hpa-behavior` — default HPA behavior YAML (tunable in UI later)
+
+### Notes
+
+- Load generation uses the built‑in HTTP load tester; if `targetURL` is empty, only metrics will be sampled.
+- Metrics source: Kubernetes Metrics API. Prometheus/DataDog providers can be added later.
+- Container name in the generated patch defaults to `app` — adjust to your deployment as needed.

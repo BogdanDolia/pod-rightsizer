@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deployment Advisor</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    .row { display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+    label { display: flex; flex-direction: column; font-size: 12px; color: #444; }
+    input { padding: 6px 8px; min-width: 200px; }
+    button { padding: 8px 12px; }
+    pre { background: #f7f7f9; padding: 12px; overflow: auto; }
+  </style>
+  <script>
+    async function startAnalyze(ev) {
+      ev.preventDefault();
+      const payload = {
+        namespace: document.getElementById('ns').value,
+        deployment: document.getElementById('deploy').value,
+        serviceName: document.getElementById('svc').value,
+        duration: document.getElementById('dur').value,
+        rps: Number(document.getElementById('rps').value || 0),
+        concurrency: Number(document.getElementById('conc').value || 0),
+        margin: Number(document.getElementById('margin').value || 20),
+        targetURL: document.getElementById('target').value
+      };
+      const res = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      document.getElementById('runId').textContent = data.runId;
+      pollStatus(data.runId);
+    }
+    async function pollStatus(id) {
+      const statusEl = document.getElementById('status');
+      const recEl = document.getElementById('rec');
+      const yamlPatchEl = document.getElementById('yamlPatch');
+      const hpaEl = document.getElementById('hpa');
+      const timer = setInterval(async () => {
+        const resp = await fetch('/api/runs/' + id);
+        if (!resp.ok) return;
+        const run = await resp.json();
+        statusEl.textContent = run.status + ' (' + run.metricsSamples + ' samples)';
+        recEl.textContent = JSON.stringify(run.recommendation || {}, null, 2);
+        if (run.status === 'completed') {
+          clearInterval(timer);
+          const y = await fetch('/api/runs/' + id + '/yaml-patch');
+          yamlPatchEl.textContent = await y.text();
+          const h = await fetch('/api/runs/' + id + '/hpa-behavior');
+          hpaEl.textContent = await h.text();
+        }
+      }, 2000);
+    }
+  </script>
+  </head>
+<body>
+  <h1>Deployment Advisor</h1>
+  <form onsubmit="startAnalyze(event)">
+    <div class="row">
+      <label>Namespace<input id="ns" value="default"></label>
+      <label>Deployment<input id="deploy" placeholder="my-deployment"></label>
+      <label>Service (optional)<input id="svc" placeholder="my-service"></label>
+    </div>
+    <div class="row">
+      <label>Duration<input id="dur" value="60s"></label>
+      <label>RPS<input id="rps" value="50" type="number"></label>
+      <label>Concurrency<input id="conc" value="0" type="number"></label>
+      <label>Margin %<input id="margin" value="20" type="number"></label>
+    </div>
+    <div class="row">
+      <label>Target URL<input id="target" placeholder="http://localhost:8080"></label>
+    </div>
+    <button type="submit">Start analyze</button>
+  </form>
+
+  <h3>Run</h3>
+  <div>Run ID: <code id="runId">-</code></div>
+  <div>Status: <code id="status">-</code></div>
+
+  <h3>Recommendation</h3>
+  <pre id="rec">{}</pre>
+
+  <h3>YAML patch</h3>
+  <pre id="yamlPatch"># waiting...</pre>
+
+  <h3>HPA behavior</h3>
+  <pre id="hpa"># waiting...</pre>
+</body>
+</html>
+

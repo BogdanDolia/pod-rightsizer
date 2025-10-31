@@ -171,7 +171,9 @@ spec:
   template:
     spec:
       containers:
-      - name: app # This assumes the container name is "app"
+      # Note: You may need to adjust the container name to match your deployment
+      # If you have multiple containers, you'll need to specify which one to update
+      - name: app
         resources:
           requests:
             cpu: "%dm"
@@ -194,14 +196,12 @@ spec:
 // extractResourceName extracts a resource name from a URL or label selector
 func extractResourceName(target string) string {
 	// If target is a URL, extract the host part
-	if strings.HasPrefix(target, "http://") {
-		hostPart := strings.TrimPrefix(target, "http://")
-		hostParts := strings.Split(hostPart, ":")
-		return hostParts[0]
-	} else if strings.HasPrefix(target, "https://") {
-		hostPart := strings.TrimPrefix(target, "https://")
-		hostParts := strings.Split(hostPart, ":")
-		return hostParts[0]
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		parts := strings.Split(target, "//")
+		if len(parts) > 1 {
+			hostPort := strings.Split(parts[1], ":")
+			return hostPort[0]
+		}
 	}
 
 	// If target is a label selector, use the value part

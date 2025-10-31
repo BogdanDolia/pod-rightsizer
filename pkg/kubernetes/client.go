@@ -169,9 +169,6 @@ func (c *Client) GetPodMetrics(ctx context.Context, namespace, target string) (f
 	return avgCPU, avgMemory, nil
 }
 
-// Note: YAML patch generation functionality has been centralized in the output package
-// to avoid code duplication. The generateYAMLPatch function there handles this functionality.
-
 // Helper functions
 
 // extractSelector attempts to create a label selector from the target
@@ -192,26 +189,4 @@ func extractSelector(target string) string {
 
 	// Default to app=target as a common label pattern
 	return fmt.Sprintf("app=%s", target)
-}
-
-// extractResourceName gets a resource name from the target
-func extractResourceName(target string) string {
-	// If target is a URL, extract the host part
-	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
-		parts := strings.Split(target, "//")
-		if len(parts) > 1 {
-			hostPort := strings.Split(parts[1], ":")
-			target = hostPort[0]
-		}
-	}
-
-	// If target is a label selector, use the value part
-	if strings.Contains(target, "=") {
-		parts := strings.Split(target, "=")
-		if len(parts) > 1 {
-			return parts[1]
-		}
-	}
-
-	return target
 }

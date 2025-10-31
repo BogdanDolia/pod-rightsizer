@@ -204,10 +204,10 @@ func (t *Tester) runRPSTest(ctx context.Context, duration time.Duration) error {
 						safeSend(&Result{Latency: latency, Error: err})
 						return
 					}
-					defer resp.Body.Close()
 
-					// Discard body to properly reuse connections
+					// Discard and close body
 					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
 
 					safeSend(&Result{
 						Latency:    latency,
@@ -579,12 +579,8 @@ func (m *Metrics) Throughput() float64 {
 		return float64(m.Requests) / duration.Seconds()
 	}
 
-	// Fallback to the original calculation (less accurate)
-	if m.TotalLatency > 0 {
-		fmt.Fprintf(os.Stderr, "Warning: Using less accurate throughput calculation based on total latency.\n")
-		return float64(m.Requests) / m.TotalLatency.Seconds()
-	}
-
+	// Fallback - we can't calculate throughput without duration
+	fmt.Fprintf(os.Stderr, "Warning: Cannot calculate throughput without test duration.\n")
 	return 0
 }
 

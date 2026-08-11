@@ -18,16 +18,24 @@ type ResourceMetrics struct {
 	MemoryUsage   float64 // in Mi
 }
 
+type podMetricsClient interface {
+	GetPodMetrics(
+		ctx context.Context,
+		namespace string,
+		workload kubernetes.Workload,
+	) (kubernetes.ContainerMetrics, error)
+}
+
 // Collector is responsible for collecting Kubernetes pod metrics
 type Collector struct {
-	k8sClient *kubernetes.Client
+	k8sClient podMetricsClient
 	namespace string
 	workload  kubernetes.Workload
 }
 
 // NewCollector creates a new metrics collector
 func NewCollector(
-	k8sClient *kubernetes.Client,
+	k8sClient podMetricsClient,
 	namespace string,
 	workload kubernetes.Workload,
 ) *Collector {

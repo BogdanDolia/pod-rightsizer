@@ -16,7 +16,10 @@ import (
 	"time"
 )
 
-const resultsBufferSize = 10_000
+const (
+	resultsBufferSize  = 10_000
+	httpRequestTimeout = 30 * time.Second
+)
 
 // Tester is responsible for running load tests.
 type Tester struct {
@@ -35,6 +38,7 @@ const (
 	TerminationContextDeadline      TerminationReason = "context_deadline_exceeded"
 	TerminationInvalidConfiguration TerminationReason = "invalid_configuration"
 	TerminationInvalidTarget        TerminationReason = "invalid_target"
+	TerminationInternalError        TerminationReason = "internal_error"
 )
 
 // RequestResult represents the result of one request attempt.
@@ -83,8 +87,43 @@ func NewTester(target string, rps, concurrency int) *Tester {
 		rps:         rps,
 		concurrency: concurrency,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: httpRequestTimeout,
 		},
+	}
+}
+
+type panicReporter struct {
+	once   sync.Once
+	errCh  chan error
+	cancel context.CancelFunc
+}
+
+func newPanicReporter(cancel context.CancelFunc) *panicReporter {
+	return &panicReporter{
+		errCh:  make(chan error, 1),
+		cancel: cancel,
+	}
+}
+
+func (r *panicReporter) report(component string, value any) {
+	r.once.Do(func() {
+		r.errCh <- fmt.Errorf("panic in %s: %v", component, value)
+		r.cancel()
+	})
+}
+
+func (r *panicReporter) recover(component string) {
+	if value := recover(); value != nil {
+		r.report(component, value)
+	}
+}
+
+func (r *panicReporter) err() error {
+	select {
+	case err := <-r.errCh:
+		return err
+	default:
+		return nil
 	}
 }
 
@@ -97,6 +136,13 @@ func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, er
 		TerminationReason: TerminationInvalidConfiguration,
 	}
 
+	if ctx == nil {
+		return result, errors.New("load-test context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		result.TerminationReason = terminationReason(ctx)
+		return result, err
+	}
 	if duration <= 0 {
 		return result, errors.New("load-test duration must be greater than zero")
 	}
@@ -116,19 +162,30 @@ func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, er
 		return result, err
 	}
 
+	runCtx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
+	reporter := newPanicReporter(cancel)
 	requestResults := make(chan RequestResult, resultsBufferSize)
 	termination := make(chan TerminationReason, 1)
 	startedAt := time.Now()
 
 	go func() {
-		var reason TerminationReason
+		reason := TerminationInternalError
+		defer func() {
+			if value := recover(); value != nil {
+				reporter.report("load-test producer", value)
+				reason = TerminationInternalError
+			}
+			close(requestResults)
+			termination <- reason
+		}()
+
 		if t.concurrency > 0 {
-			reason = t.runConcurrentTest(ctx, duration, targetURL, requestResults)
+			reason = t.runConcurrentTest(runCtx, ctx, targetURL, requestResults, reporter)
 		} else {
-			reason = t.runRPSTest(ctx, duration, targetURL, requestResults)
+			reason = t.runRPSTest(runCtx, ctx, targetURL, requestResults, reporter)
 		}
-		close(requestResults)
-		termination <- reason
 	}()
 
 	var metrics Metrics
@@ -149,22 +206,27 @@ func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, er
 	result = metrics.RunResult(<-termination)
 	result.PrintSummary()
 
+	if err := reporter.err(); err != nil {
+		result.TerminationReason = TerminationInternalError
+		return result, err
+	}
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
 	return result, nil
 }
 
-// runRPSTest schedules requests at the configured rate until the requested
-// duration elapses. Requests already in flight are allowed to complete so their
-// result is included in the final statistics.
+// runRPSTest schedules requests at the configured rate until runCtx is done.
+// All in-flight requests use that same context, so cancellation is complete
+// before this function returns.
 func (t *Tester) runRPSTest(
-	ctx context.Context,
-	duration time.Duration,
+	runCtx context.Context,
+	parentCtx context.Context,
 	targetURL *url.URL,
 	results chan<- RequestResult,
+	reporter *panicReporter,
 ) TerminationReason {
-	fmt.Printf("Starting load test with %d RPS for %s...\n", t.rps, duration)
+	fmt.Printf("Starting load test with %d RPS...\n", t.rps)
 
 	interval := time.Second / time.Duration(t.rps)
 	if interval <= 0 {
@@ -173,20 +235,18 @@ func (t *Tester) runRPSTest(
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	scheduleCtx, stopScheduling := context.WithTimeout(ctx, duration)
-	defer stopScheduling()
-
 	var requests sync.WaitGroup
 	for {
 		select {
-		case <-scheduleCtx.Done():
+		case <-runCtx.Done():
 			requests.Wait()
-			return terminationReason(ctx)
+			return terminationReason(parentCtx)
 		case <-ticker.C:
 			requests.Add(1)
 			go func() {
 				defer requests.Done()
-				results <- t.doRequest(ctx, targetURL)
+				defer reporter.recover("HTTP request")
+				sendResult(runCtx, results, t.doRequest(runCtx, targetURL))
 			}()
 		}
 	}
@@ -195,39 +255,37 @@ func (t *Tester) runRPSTest(
 // runConcurrentTest keeps the configured number of workers active until the
 // requested duration elapses.
 func (t *Tester) runConcurrentTest(
-	ctx context.Context,
-	duration time.Duration,
+	runCtx context.Context,
+	parentCtx context.Context,
 	targetURL *url.URL,
 	results chan<- RequestResult,
+	reporter *panicReporter,
 ) TerminationReason {
 	fmt.Printf(
-		"Starting concurrent load test with %d workers for %s...\n",
+		"Starting concurrent load test with %d workers...\n",
 		t.concurrency,
-		duration,
 	)
-
-	scheduleCtx, stopScheduling := context.WithTimeout(ctx, duration)
-	defer stopScheduling()
 
 	var workers sync.WaitGroup
 	for i := 0; i < t.concurrency; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			defer reporter.recover("HTTP worker")
 			for {
 				select {
-				case <-scheduleCtx.Done():
+				case <-runCtx.Done():
 					return
 				default:
 				}
 
-				requestResult := t.doRequest(ctx, targetURL)
-				results <- requestResult
+				requestResult := t.doRequest(runCtx, targetURL)
+				if !sendResult(runCtx, results, requestResult) {
+					return
+				}
 				if requestResult.Error != nil {
-					select {
-					case <-scheduleCtx.Done():
+					if !waitFor(runCtx, 100*time.Millisecond) {
 						return
-					case <-time.After(100 * time.Millisecond):
 					}
 				}
 			}
@@ -235,7 +293,7 @@ func (t *Tester) runConcurrentTest(
 	}
 
 	workers.Wait()
-	return terminationReason(ctx)
+	return terminationReason(parentCtx)
 }
 
 func (t *Tester) doRequest(ctx context.Context, targetURL *url.URL) RequestResult {
@@ -264,6 +322,26 @@ func (t *Tester) doRequest(ctx context.Context, targetURL *url.URL) RequestResul
 	}
 
 	return RequestResult{Latency: latency, StatusCode: resp.StatusCode}
+}
+
+func sendResult(ctx context.Context, results chan<- RequestResult, result RequestResult) bool {
+	select {
+	case results <- result:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func waitFor(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func logRequestError(err error) {

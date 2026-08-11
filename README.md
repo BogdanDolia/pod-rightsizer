@@ -248,6 +248,43 @@ kubectl logs job/pod-rightsizer -f
 
 The job will analyze the selected Deployment container and output resource recommendations, which you can then apply to that Deployment.
 
+## Advisor API
+
+The repository also includes an HTTP service that orchestrates an analysis and serves a minimal UI:
+
+```bash
+go run ./cmd/advisor-api
+# PORT can be set via the environment; the default is 8080
+```
+
+The service uses in-cluster credentials or `$HOME/.kube/config`. Open `http://localhost:8080/` for the UI.
+
+### API
+
+- `POST /api/analyze` starts a run. Example body:
+
+  ```json
+  {
+    "namespace": "default",
+    "deployment": "my-deployment",
+    "container": "app",
+    "duration": "60s",
+    "rps": 50,
+    "concurrency": 0,
+    "margin": 20,
+    "targetURL": "http://localhost:8080",
+    "minimumSamples": 3,
+    "maximumHTTPErrorRate": 1,
+    "maximumP95Latency": "1s"
+  }
+  ```
+
+- `GET /api/runs/{id}` returns status, load-test evidence, recommendation, and advice.
+- `GET /api/runs/{id}/yaml-patch` returns a patch for the resolved Deployment and container.
+- `GET /api/runs/{id}/hpa-behavior` returns a default HPA behavior block.
+
+When `targetURL` is set, the API applies the same load-test SLO gate as the CLI. If it is omitted, the API only samples metrics. Metrics still must contain the configured number of independent source windows.
+
 ## License
 
 MIT

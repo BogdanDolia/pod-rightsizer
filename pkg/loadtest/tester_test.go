@@ -7,6 +7,8 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -106,6 +108,113 @@ func TestRunReturnsCancellationReason(t *testing.T) {
 	}
 	if result.TerminationReason != TerminationContextCanceled {
 		t.Fatalf("TerminationReason = %q, want %q", result.TerminationReason, TerminationContextCanceled)
+	}
+}
+
+func TestRunCancellationStopsRequestsBeforeReturning(t *testing.T) {
+	var active atomic.Int32
+	started := make(chan struct{})
+	var startedOnce sync.Once
+
+	tester := NewTester("http://example.test", 0, 2)
+	tester.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		active.Add(1)
+		defer active.Add(-1)
+		startedOnce.Do(func() { close(started) })
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-started:
+			cancel()
+		case <-time.After(time.Second):
+			cancel()
+		}
+	}()
+
+	result, err := tester.Run(ctx, time.Minute)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if result.TerminationReason != TerminationContextCanceled {
+		t.Fatalf("TerminationReason = %q, want %q", result.TerminationReason, TerminationContextCanceled)
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("Run() returned with %d active HTTP requests", got)
+	}
+}
+
+func TestRunDurationTimeoutCancelsHTTPContext(t *testing.T) {
+	var active atomic.Int32
+	var sawDeadline atomic.Bool
+
+	tester := NewTester("http://example.test", 0, 1)
+	tester.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		active.Add(1)
+		defer active.Add(-1)
+		if _, ok := request.Context().Deadline(); ok {
+			sawDeadline.Store(true)
+		}
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})
+
+	startedAt := time.Now()
+	result, err := tester.Run(context.Background(), 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Run() error = %v, want duration completion", err)
+	}
+	if result.TerminationReason != TerminationDurationElapsed {
+		t.Fatalf("TerminationReason = %q, want %q", result.TerminationReason, TerminationDurationElapsed)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("Run() took %s, want bounded completion", elapsed)
+	}
+	if !sawDeadline.Load() {
+		t.Fatal("HTTP request context had no deadline")
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("Run() returned with %d active HTTP requests", got)
+	}
+}
+
+func TestRunRecoversWorkerPanic(t *testing.T) {
+	tester := NewTester("http://example.test", 0, 1)
+	tester.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		panic("transport exploded")
+	})
+
+	result, err := tester.Run(context.Background(), time.Second)
+	if err == nil || !strings.Contains(err.Error(), "panic in HTTP worker: transport exploded") {
+		t.Fatalf("Run() error = %v, want recovered worker panic", err)
+	}
+	if result.TerminationReason != TerminationInternalError {
+		t.Fatalf("TerminationReason = %q, want %q", result.TerminationReason, TerminationInternalError)
+	}
+}
+
+func TestRunRecoversRPSRequestPanic(t *testing.T) {
+	tester := NewTester("http://example.test", 1_000, 0)
+	tester.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		panic("RPS transport exploded")
+	})
+
+	result, err := tester.Run(context.Background(), time.Second)
+	if err == nil || !strings.Contains(err.Error(), "panic in HTTP request: RPS transport exploded") {
+		t.Fatalf("Run() error = %v, want recovered request panic", err)
+	}
+	if result.TerminationReason != TerminationInternalError {
+		t.Fatalf("TerminationReason = %q, want %q", result.TerminationReason, TerminationInternalError)
+	}
+}
+
+func TestRunRejectsNilContext(t *testing.T) {
+	_, err := NewTester("example.test", 1, 0).Run(nil, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "context must not be nil") {
+		t.Fatalf("Run() error = %v, want nil-context error", err)
 	}
 }
 

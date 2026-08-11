@@ -1,0 +1,725 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/BogdanDolia/pod-rightsizer/pkg/knowledge"
+	corek8s "github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
+	coreloadtest "github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
+	coremetrics "github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
+	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	"github.com/google/uuid"
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
+)
+
+const (
+	statusCreated  = "created"
+	statusRunning  = "running"
+	statusComplete = "completed"
+	statusFailed   = "failed"
+
+	defaultAnalysisDuration = 60 * time.Second
+	maximumAnalysisDuration = 24 * time.Hour
+	analysisCleanupTimeout  = 30 * time.Second
+	defaultSamplingInterval = 5 * time.Second
+	maximumRPS              = 10_000
+	maximumConcurrency      = 1_000
+	defaultMinimumRPSRatio  = 0.95
+	defaultMaximumErrorPct  = 1.0
+	defaultMaximumP95       = time.Second
+)
+
+// AnalyzeRequest represents the input payload for a new analysis run.
+type AnalyzeRequest struct {
+	Namespace   string `json:"namespace"`
+	Deployment  string `json:"deployment"`
+	Container   string `json:"container"`
+	ServiceName string `json:"serviceName,omitempty"`
+	Duration    string `json:"duration"` // e.g. "2m"
+	RPS         int    `json:"rps,omitempty"`
+	Concurrency int    `json:"concurrency,omitempty"`
+	Margin      int    `json:"margin"`
+	TargetURL   string `json:"targetURL,omitempty"`
+
+	MinimumActualRPS     float64  `json:"minimumActualRPS,omitempty"`
+	MaximumHTTPErrorRate *float64 `json:"maximumHTTPErrorRate,omitempty"`
+	MaximumP95Latency    string   `json:"maximumP95Latency,omitempty"`
+	MinimumSamples       int      `json:"minimumSamples,omitempty"`
+}
+
+// AnalyzeResponse contains the created run identifier.
+type AnalyzeResponse struct {
+	RunID string `json:"runId"`
+}
+
+// RunStatus represents current status and results for a run.
+type RunStatus struct {
+	RunID       string     `json:"runId"`
+	Status      string     `json:"status"` // created | running | completed | failed
+	CreatedAt   time.Time  `json:"createdAt"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	// Placeholders for future fields
+	MetricsSamples int                     `json:"metricsSamples"`
+	Recommendation any                     `json:"recommendation,omitempty"`
+	Request        AnalyzeRequest          `json:"request"`
+	Advice         []string                `json:"advice,omitempty"`
+	Workload       corek8s.Workload        `json:"workload,omitempty"`
+	LoadTest       *coreloadtest.RunResult `json:"loadTest,omitempty"`
+}
+
+type analysisKubernetesClient interface {
+	ResolveWorkload(
+		ctx context.Context,
+		namespace, deploymentName, containerName string,
+	) (corek8s.Workload, error)
+	GetResourceSettings(
+		ctx context.Context,
+		namespace string,
+		workload corek8s.Workload,
+	) (corek8s.ResourceSettings, error)
+	GetPodMetrics(
+		ctx context.Context,
+		namespace string,
+		workload corek8s.Workload,
+	) (corek8s.ContainerMetrics, error)
+}
+
+type analysisLoadTester interface {
+	Run(ctx context.Context, duration time.Duration) (coreloadtest.RunResult, error)
+}
+
+// Server is an HTTP handler implementing the API surface.
+type Server struct {
+	mux *http.ServeMux
+
+	mu   sync.RWMutex
+	runs map[string]RunStatus
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	lifecycleMu sync.Mutex
+	stopping    bool
+	runsWG      sync.WaitGroup
+
+	newKubernetesClient func() (analysisKubernetesClient, error)
+	newLoadTester       func(target string, rps, concurrency int) analysisLoadTester
+	samplingInterval    time.Duration
+	analyze             func(context.Context, string, AnalyzeRequest)
+}
+
+// New creates a new Server with routes registered.
+func New() *Server {
+	return NewWithContext(context.Background())
+}
+
+// NewWithContext creates a Server whose background analyses are canceled when
+// parent is canceled.
+func NewWithContext(parent context.Context) *Server {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	s := &Server{
+		mux:              http.NewServeMux(),
+		runs:             make(map[string]RunStatus),
+		ctx:              ctx,
+		cancel:           cancel,
+		samplingInterval: defaultSamplingInterval,
+		newKubernetesClient: func() (analysisKubernetesClient, error) {
+			return corek8s.NewClient("")
+		},
+		newLoadTester: func(target string, rps, concurrency int) analysisLoadTester {
+			return coreloadtest.NewTester(target, rps, concurrency)
+		},
+	}
+	s.analyze = s.runAnalysis
+	s.registerRoutes()
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if value := recover(); value != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+	}()
+	s.mux.ServeHTTP(w, r)
+}
+
+// Shutdown cancels all active analyses and waits until their goroutines exit.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("shutdown context must not be nil")
+	}
+
+	s.lifecycleMu.Lock()
+	s.stopping = true
+	s.cancel()
+	s.lifecycleMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.runsWG.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) registerRoutes() {
+	// API routes first
+	s.mux.HandleFunc("/api/analyze", s.handleAnalyze)
+	s.mux.HandleFunc("/api/runs/", s.dispatchRuns)
+
+	// Static UI (served from local directory web/ui)
+	fileServer := http.FileServer(http.Dir("web/ui"))
+	s.mux.Handle("/", fileServer)
+}
+
+func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AnalyzeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if err := validateAnalyzeRequest(req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	id := uuid.NewString()
+	now := time.Now().UTC()
+
+	initial := RunStatus{
+		RunID:          id,
+		Status:         statusCreated,
+		CreatedAt:      now,
+		MetricsSamples: 0,
+		Request:        req,
+	}
+	if !s.startAnalysis(initial) {
+		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(AnalyzeResponse{RunID: id})
+}
+
+func (s *Server) startAnalysis(initial RunStatus) bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopping || s.ctx.Err() != nil {
+		return false
+	}
+
+	s.mu.Lock()
+	s.runs[initial.RunID] = initial
+	s.mu.Unlock()
+
+	s.runsWG.Add(1)
+	go func() {
+		defer s.runsWG.Done()
+		defer func() {
+			if value := recover(); value != nil {
+				s.finishWithError(initial.RunID, fmt.Errorf("analysis panic: %v", value))
+			}
+		}()
+		s.analyze(s.ctx, initial.RunID, initial.Request)
+	}()
+	return true
+}
+
+func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRequest) {
+	s.updateRun(id, func(run *RunStatus) {
+		run.Status = statusRunning
+	})
+
+	duration := analysisDuration(req.Duration)
+	operationCtx, cancelOperation := context.WithTimeout(
+		parentCtx,
+		duration+analysisCleanupTimeout,
+	)
+	defer cancelOperation()
+
+	k8sClient, err := s.newKubernetesClient()
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("k8s client: %w", err))
+		return
+	}
+	workload, err := k8sClient.ResolveWorkload(
+		operationCtx,
+		req.Namespace,
+		req.Deployment,
+		req.Container,
+	)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("resolve workload: %w", err))
+		return
+	}
+
+	currentSettings, err := k8sClient.GetResourceSettings(
+		operationCtx,
+		req.Namespace,
+		workload,
+	)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("get resource settings: %w", err))
+		return
+	}
+
+	collector := coremetrics.NewCollector(k8sClient, req.Namespace, workload)
+	analysisCtx, cancelAnalysis := context.WithCancel(operationCtx)
+	defer cancelAnalysis()
+	measurementCtx, stopMeasurement := context.WithTimeout(analysisCtx, duration)
+	defer stopMeasurement()
+
+	type loadTestOutcome struct {
+		result coreloadtest.RunResult
+		err    error
+	}
+	var loadTestDone <-chan loadTestOutcome
+	if req.TargetURL != "" {
+		done := make(chan loadTestOutcome, 1)
+		loadTestDone = done
+		tester := s.newLoadTester(req.TargetURL, req.RPS, req.Concurrency)
+		go func() {
+			defer func() {
+				if value := recover(); value != nil {
+					done <- loadTestOutcome{err: fmt.Errorf("load test panic: %v", value)}
+				}
+			}()
+			result, runErr := tester.Run(analysisCtx, duration)
+			done <- loadTestOutcome{result: result, err: runErr}
+		}()
+	}
+
+	var samples []coremetrics.ResourceMetrics
+	var metricsErr error
+	var loadTestErr error
+	var loadTestResult coreloadtest.RunResult
+	loadTestFinished := loadTestDone == nil
+	ticker := time.NewTicker(s.samplingInterval)
+	defer ticker.Stop()
+
+	for collect := true; collect; {
+		sample, err := collector.CollectMetrics(measurementCtx)
+		switch {
+		case err == nil:
+			samples = append(samples, sample)
+		case measurementCtx.Err() == nil:
+			metricsErr = err
+			cancelAnalysis()
+			collect = false
+		}
+		if !collect {
+			continue
+		}
+
+		select {
+		case <-measurementCtx.Done():
+			collect = false
+		case outcome := <-loadTestDone:
+			loadTestDone = nil
+			loadTestFinished = true
+			loadTestResult = outcome.result
+			loadTestErr = outcome.err
+			if loadTestErr != nil {
+				cancelAnalysis()
+				collect = false
+			}
+		case <-ticker.C:
+		}
+	}
+
+	if !loadTestFinished {
+		outcome := <-loadTestDone
+		loadTestResult = outcome.result
+		loadTestErr = outcome.err
+	}
+
+	if err := parentCtx.Err(); err != nil {
+		s.finishWithError(id, fmt.Errorf("analysis canceled: %w", err))
+		return
+	}
+	if err := operationCtx.Err(); err != nil {
+		s.finishWithError(id, fmt.Errorf("analysis timeout: %w", err))
+		return
+	}
+	if metricsErr != nil {
+		s.finishWithError(id, fmt.Errorf("collect metrics: %w", metricsErr))
+		return
+	}
+	if loadTestErr != nil {
+		s.finishWithError(id, fmt.Errorf("load test: %w", loadTestErr))
+		return
+	}
+	if req.TargetURL != "" {
+		assessment, assessmentErr := loadTestResult.EvaluateSLO(loadTestSLO(req))
+		if assessmentErr != nil {
+			s.finishWithError(id, fmt.Errorf("invalid load-test SLO: %w", assessmentErr))
+			return
+		}
+		if !assessment.Passed {
+			s.finishWithError(
+				id,
+				fmt.Errorf("load test did not meet SLO: %s", strings.Join(assessment.Violations, "; ")),
+			)
+			return
+		}
+	}
+
+	independentSamples, err := coremetrics.IndependentSamples(samples)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("validate metrics: %w", err))
+		return
+	}
+	minimumSamples := req.MinimumSamples
+	if minimumSamples == 0 {
+		minimumSamples = recommender.DefaultMinimumSamples
+	}
+	recommendation, err := recommender.GenerateRecommendations(
+		independentSamples,
+		currentSettings,
+		req.Margin,
+		minimumSamples,
+	)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("generate recommendation: %w", err))
+		return
+	}
+	advice := knowledge.Evaluate(independentSamples, recommendation)
+	completed := time.Now().UTC()
+	s.updateRun(id, func(run *RunStatus) {
+		run.Status = statusComplete
+		run.CompletedAt = &completed
+		run.Error = ""
+		run.MetricsSamples = len(independentSamples)
+		run.Recommendation = recommendation
+		run.Advice = advice
+		run.Workload = workload
+		if req.TargetURL != "" {
+			resultCopy := loadTestResult
+			run.LoadTest = &resultCopy
+		}
+	})
+}
+
+func validateAnalyzeRequest(req AnalyzeRequest) error {
+	for _, check := range []struct {
+		name     string
+		value    string
+		validate func(string) []string
+	}{
+		{name: "namespace", value: req.Namespace, validate: k8svalidation.IsDNS1123Label},
+		{name: "deployment", value: req.Deployment, validate: k8svalidation.IsDNS1123Subdomain},
+		{name: "container", value: req.Container, validate: k8svalidation.IsDNS1123Label},
+	} {
+		if check.value == "" {
+			return fmt.Errorf("%s must not be empty", check.name)
+		}
+		if problems := check.validate(check.value); len(problems) > 0 {
+			return fmt.Errorf("invalid %s: %s", check.name, strings.Join(problems, "; "))
+		}
+	}
+
+	duration, err := time.ParseDuration(req.Duration)
+	if err != nil || duration <= 0 {
+		return errors.New("duration must be a positive Go duration")
+	}
+	if duration > maximumAnalysisDuration {
+		return fmt.Errorf("duration must not exceed %s", maximumAnalysisDuration)
+	}
+	if req.Margin < 0 || req.Margin > 100 {
+		return errors.New("margin must be between 0 and 100")
+	}
+	if req.RPS < 0 || req.RPS > maximumRPS {
+		return fmt.Errorf("rps must be between 0 and %d", maximumRPS)
+	}
+	if req.Concurrency < 0 || req.Concurrency > maximumConcurrency {
+		return fmt.Errorf("concurrency must be between 0 and %d", maximumConcurrency)
+	}
+	if req.TargetURL != "" && req.RPS == 0 && req.Concurrency == 0 {
+		return errors.New("rps or concurrency must be positive when targetURL is set")
+	}
+	if math.IsNaN(req.MinimumActualRPS) ||
+		math.IsInf(req.MinimumActualRPS, 0) ||
+		req.MinimumActualRPS < 0 {
+		return errors.New("minimumActualRPS must be a finite non-negative number")
+	}
+	if req.MaximumHTTPErrorRate != nil &&
+		(math.IsNaN(*req.MaximumHTTPErrorRate) ||
+			math.IsInf(*req.MaximumHTTPErrorRate, 0) ||
+			*req.MaximumHTTPErrorRate < 0 ||
+			*req.MaximumHTTPErrorRate > 100) {
+		return errors.New("maximumHTTPErrorRate must be between 0 and 100")
+	}
+	if req.MaximumP95Latency != "" {
+		maximumP95, parseErr := time.ParseDuration(req.MaximumP95Latency)
+		if parseErr != nil || maximumP95 <= 0 {
+			return errors.New("maximumP95Latency must be a positive Go duration")
+		}
+	}
+	if req.MinimumSamples != 0 && req.MinimumSamples < 2 {
+		return errors.New("minimumSamples must be at least 2")
+	}
+	return nil
+}
+
+func loadTestSLO(req AnalyzeRequest) coreloadtest.SLO {
+	minimumRPS := req.MinimumActualRPS
+	if minimumRPS == 0 && req.Concurrency == 0 {
+		minimumRPS = float64(req.RPS) * defaultMinimumRPSRatio
+	}
+	maximumErrorPercent := defaultMaximumErrorPct
+	if req.MaximumHTTPErrorRate != nil {
+		maximumErrorPercent = *req.MaximumHTTPErrorRate
+	}
+	maximumP95 := defaultMaximumP95
+	if req.MaximumP95Latency != "" {
+		maximumP95, _ = time.ParseDuration(req.MaximumP95Latency)
+	}
+	return coreloadtest.SLO{
+		MinimumRPS:           minimumRPS,
+		MaximumHTTPErrorRate: maximumErrorPercent / 100,
+		MaximumP95Latency:    maximumP95,
+	}
+}
+
+func analysisDuration(value string) time.Duration {
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return defaultAnalysisDuration
+	}
+	if duration > maximumAnalysisDuration {
+		return maximumAnalysisDuration
+	}
+	return duration
+}
+
+func (s *Server) finishWithError(id string, err error) {
+	completed := time.Now().UTC()
+	s.updateRun(id, func(run *RunStatus) {
+		run.Status = statusFailed
+		run.CompletedAt = &completed
+		run.Error = err.Error()
+	})
+}
+
+func (s *Server) updateRun(id string, update func(*RunStatus)) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.runs[id]
+	if !ok {
+		return false
+	}
+	update(&run)
+	s.runs[id] = run
+	return true
+}
+
+func (s *Server) runSnapshot(id string) (RunStatus, bool) {
+	s.mu.RLock()
+	run, ok := s.runs[id]
+	s.mu.RUnlock()
+	if !ok {
+		return RunStatus{}, false
+	}
+
+	if run.CompletedAt != nil {
+		completed := *run.CompletedAt
+		run.CompletedAt = &completed
+	}
+	if run.LoadTest != nil {
+		loadTest := *run.LoadTest
+		loadTest.StatusCodes = make(map[int]int, len(run.LoadTest.StatusCodes))
+		for code, count := range run.LoadTest.StatusCodes {
+			loadTest.StatusCodes[code] = count
+		}
+		run.LoadTest = &loadTest
+	}
+	run.Advice = append([]string(nil), run.Advice...)
+	return run, true
+}
+
+func (s *Server) dispatchRuns(w http.ResponseWriter, r *http.Request) {
+	// Expecting paths:
+	// GET /api/runs/{id}
+	// GET /api/runs/{id}/yaml-patch
+	// GET /api/runs/{id}/hpa-behavior
+	path := strings.TrimPrefix(r.URL.Path, "/api/runs/")
+	if path == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	parts := strings.Split(path, "/")
+	id := parts[0]
+	tail := ""
+	if len(parts) > 1 {
+		tail = strings.Join(parts[1:], "/")
+	}
+
+	switch tail {
+	case "":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleGetRun(w, r, id)
+		return
+	case "yaml-patch":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleGetYamlPatch(w, r, id)
+		return
+	case "hpa-behavior":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleGetHPABehavior(w, r, id)
+		return
+	default:
+		http.NotFound(w, r)
+		return
+	}
+}
+
+func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request, id string) {
+	run, ok := s.runSnapshot(id)
+	if !ok {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(run)
+}
+
+func (s *Server) handleGetYamlPatch(w http.ResponseWriter, r *http.Request, id string) {
+	run, ok := s.runSnapshot(id)
+	if !ok {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	if run.Status != statusComplete {
+		http.Error(w, "run not completed yet", http.StatusConflict)
+		return
+	}
+
+	// Extract recommendation
+	rec, ok := run.Recommendation.(recommender.Recommendations)
+	if !ok {
+		// In case of JSON-marshaled type, try to re-map via json
+		var tmp recommender.Recommendations
+		b, _ := json.Marshal(run.Recommendation)
+		_ = json.Unmarshal(b, &tmp)
+		rec = tmp
+	}
+
+	ns := run.Request.Namespace
+	name := run.Workload.DeploymentName
+	if name == "" {
+		name = run.Request.Deployment
+	}
+	container := run.Workload.ContainerName
+	if container == "" {
+		container = run.Request.Container
+	}
+
+	yaml := generateResourcePatchYAML(ns, name, container, rec)
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	_, _ = io.WriteString(w, yaml)
+}
+
+func (s *Server) handleGetHPABehavior(w http.ResponseWriter, r *http.Request, id string) {
+	_, ok := s.runSnapshot(id)
+	if !ok {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	// Basic default behavior; UI can customize later
+	_, _ = io.WriteString(w, defaultHPABehaviorYAML())
+}
+
+func formatCPUToMilli(cores float64) int {
+	// Round to nearest milli
+	return int(cores*1000 + 0.5)
+}
+
+func formatMemToMi(mi float64) int {
+	return int(mi + 0.5)
+}
+
+func generateResourcePatchYAML(
+	namespace, deploy, container string,
+	r recommender.Recommendations,
+) string {
+	reqCPU := formatCPUToMilli(r.CPURequest)
+	limCPU := formatCPUToMilli(r.CPULimit)
+	reqMem := formatMemToMi(r.MemoryRequest)
+	limMem := formatMemToMi(r.MemoryLimit)
+
+	return fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: %s
+  name: %s
+spec:
+  template:
+    spec:
+      containers:
+      - name: %s
+        resources:
+          requests:
+            cpu: "%dm"
+            memory: "%dMi"
+          limits:
+            cpu: "%dm"
+            memory: "%dMi"`, namespace, deploy, container, reqCPU, reqMem, limCPU, limMem)
+}
+
+func defaultHPABehaviorYAML() string {
+	return `behavior:
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    policies:
+    - type: Percent
+      value: 100
+      periodSeconds: 15
+    selectPolicy: Max
+  scaleUp:
+    stabilizationWindowSeconds: 0
+    policies:
+    - type: Percent
+      value: 100
+      periodSeconds: 15
+    - type: Pods
+      value: 4
+      periodSeconds: 15
+    selectPolicy: Max`
+}

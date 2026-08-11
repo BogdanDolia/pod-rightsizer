@@ -60,18 +60,13 @@ func main() {
 	// Parse command line arguments
 	cfg := parseFlags()
 
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
+	// Set up signal-aware cancellation without leaving a signal goroutine behind.
+	ctx, cancel := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
 	defer cancel()
-
-	// Set up signal handling for clean shutdown
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-signalChan
-		fmt.Println("\nReceived termination signal. Stopping gracefully...")
-		cancel()
-	}()
 
 	// Initialize Kubernetes client
 	k8sClient, err := kubernetes.NewClient(cfg.KubeconfigPath)

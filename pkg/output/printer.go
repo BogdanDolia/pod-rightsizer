@@ -6,7 +6,6 @@ import (
 	"math"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
@@ -28,6 +27,7 @@ type Result struct {
 	CurrentSettings kubernetes.ResourceSettings
 	Metrics         []metrics.ResourceMetrics
 	Recommendations recommender.Recommendations
+	ResourcePatch   *kubernetes.ResourcePatch
 }
 
 // PrintResults displays the results in the specified format and writes the
@@ -226,58 +226,19 @@ func printYAML(r Result) error {
 
 // generateYAMLPatch creates a YAML patch for the resources
 func generateYAMLPatch(r Result) (string, error) {
-	return GenerateResourcePatch(
-		r.Namespace,
-		r.Workload.DeploymentName,
-		r.Workload.ContainerName,
-		r.Recommendations,
-	), nil
-}
-
-// GenerateResourcePatch renders a strategic merge patch for one Deployment
-// container. A zero recommendation limit is emitted as null so applying the
-// patch removes an existing limit instead of preserving it.
-func GenerateResourcePatch(
-	namespace, deployment, container string,
-	recommendation recommender.Recommendations,
-) string {
-	var patch strings.Builder
-	fmt.Fprintf(&patch, `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  namespace: %s
-  name: %s
-spec:
-  template:
-    spec:
-      containers:
-      - name: %s
-        resources:
-          requests:
-            cpu: "%dm"
-            memory: "%dMi"
-`,
-		namespace,
-		deployment,
-		container,
-		int(math.Ceil(recommendation.CPURequest*1000)),
-		int(math.Ceil(recommendation.MemoryRequest)),
-	)
-	// Strategic merge patches preserve omitted map keys. Emit null explicitly
-	// when a policy disables a limit so an existing Deployment limit is removed.
-	patch.WriteString("          limits:\n")
-	if recommendation.CPULimit > 0 {
-		fmt.Fprintf(&patch, "            cpu: \"%dm\"\n", int(math.Ceil(recommendation.CPULimit*1000)))
-	} else {
-		patch.WriteString("            cpu: null\n")
+	if r.ResourcePatch == nil {
+		return "", fmt.Errorf("server-side dry-run resource patch is missing")
 	}
-	if recommendation.MemoryLimit > 0 {
-		fmt.Fprintf(&patch, "            memory: \"%dMi\"\n", int(math.Ceil(recommendation.MemoryLimit)))
-	} else {
-		patch.WriteString("            memory: null\n")
+	if r.ResourcePatch.Namespace() != r.Namespace ||
+		r.ResourcePatch.DeploymentName() != r.Workload.DeploymentName ||
+		r.ResourcePatch.ContainerName() != r.Workload.ContainerName {
+		return "", fmt.Errorf("resource patch identity does not match the resolved workload")
 	}
-
-	return patch.String()
+	patch, err := r.ResourcePatch.YAML()
+	if err != nil {
+		return "", err
+	}
+	return string(patch), nil
 }
 
 func printOptionalCPU(label string, value float64) {

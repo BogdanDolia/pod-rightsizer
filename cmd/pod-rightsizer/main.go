@@ -67,12 +67,14 @@ func main() {
 	cfg := parseFlags()
 
 	// Set up signal-aware cancellation without leaving a signal goroutine behind.
-	ctx, cancel := signal.NotifyContext(
+	ctx, stopSignals := signal.NotifyContext(
 		context.Background(),
 		syscall.SIGINT,
 		syscall.SIGTERM,
 	)
-	defer cancel()
+	defer stopSignals()
+	measurementCtx, stopMeasurement := context.WithCancel(ctx)
+	defer stopMeasurement()
 
 	// Initialize Kubernetes client
 	k8sClient, err := kubernetes.NewClient(cfg.KubeconfigPath)
@@ -130,7 +132,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 		defer close(metricsChan)
-		collectMetrics(ctx, metricsCollector, metricsChan, metricsErrChan)
+		collectMetrics(measurementCtx, metricsCollector, metricsChan, metricsErrChan)
 	}()
 
 	// Start load test and wait for completion or cancellation
@@ -139,7 +141,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 		startedAt := time.Now().UTC()
-		result, err := loadTester.Run(ctx, cfg.Duration)
+		result, err := loadTester.Run(measurementCtx, cfg.Duration)
 		resultChan <- loadTestOutcome{
 			Result:     result,
 			Err:        err,
@@ -212,7 +214,7 @@ collectionLoop:
 	if finalMetricsTimer != nil {
 		finalMetricsTimer.Stop()
 	}
-	cancel()
+	stopMeasurement()
 
 	// Wait for all goroutines to complete
 	wg.Wait()
@@ -260,6 +262,23 @@ collectionLoop:
 		os.Exit(1)
 	}
 
+	fmt.Fprintln(os.Stderr, "Validating resource patch with Kubernetes server-side dry-run...")
+	resourcePatch, err := k8sClient.PrepareResourcePatch(
+		ctx,
+		cfg.Namespace,
+		workload,
+		kubernetes.ResourceSettings{
+			CPURequest:    recommendations.CPURequest,
+			CPULimit:      recommendations.CPULimit,
+			MemoryRequest: recommendations.MemoryRequest,
+			MemoryLimit:   recommendations.MemoryLimit,
+		},
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot generate safe resource patch: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Output results
 	result := output.Result{
 		Target:          cfg.Target,
@@ -273,6 +292,7 @@ collectionLoop:
 		CurrentSettings: currentSettings,
 		Metrics:         measurementMetrics,
 		Recommendations: recommendations,
+		ResourcePatch:   resourcePatch,
 	}
 
 	if err := output.PrintResults(result, cfg.OutputFormat); err != nil {

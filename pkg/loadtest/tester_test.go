@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,6 +90,32 @@ func TestRunReturnsTypedResult(t *testing.T) {
 	}
 	if result.TerminationReason != TerminationDurationElapsed {
 		t.Fatalf("TerminationReason = %q, want %q", result.TerminationReason, TerminationDurationElapsed)
+	}
+}
+
+func TestRunUsesHTTPTestServer(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	result, err := NewTester(server.URL, 200, 0).Run(context.Background(), 40*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if requests.Load() == 0 || result.Requests == 0 {
+		t.Fatalf("server requests/result requests = %d/%d, want positive", requests.Load(), result.Requests)
+	}
+	if result.StatusCodes[http.StatusNoContent] != int(requests.Load()) {
+		t.Fatalf("status codes/server requests = %#v/%d", result.StatusCodes, requests.Load())
+	}
+	if result.Requests < int(requests.Load()) {
+		t.Fatalf("result requests = %d, server requests = %d", result.Requests, requests.Load())
 	}
 }
 

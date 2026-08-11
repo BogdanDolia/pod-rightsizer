@@ -238,6 +238,22 @@ func TestGetPodMetricsRejectsMissingSourceMetadata(t *testing.T) {
 	}
 }
 
+func TestGetPodMetricsRejectsEmptyMetricsResponse(t *testing.T) {
+	client := newTestClient(
+		t,
+		[]runtime.Object{testPod("payments-abc", map[string]string{"component": "payments"})},
+		nil,
+	)
+	_, err := client.GetPodMetrics(context.Background(), "shop", Workload{
+		DeploymentName: "payments",
+		ContainerName:  "worker",
+		PodSelector:    "component=payments",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no metrics found") {
+		t.Fatalf("GetPodMetrics() error = %v, want empty metrics error", err)
+	}
+}
+
 func TestGetPodMetricsPreservesSubMillicorePrecision(t *testing.T) {
 	podMetrics := testPodMetrics(
 		"payments-abc",

@@ -17,19 +17,12 @@ import (
 )
 
 func TestGenerateYAMLPatchUsesResolvedDeploymentAndContainer(t *testing.T) {
-	patch, err := generateYAMLPatch(Result{
-		Namespace: "shop",
-		Workload: kubernetes.Workload{
-			DeploymentName: "payments-api",
-			ContainerName:  "worker",
-		},
-		Recommendations: recommender.Recommendations{
-			CPURequest:    0.1,
-			CPULimit:      0.2,
-			MemoryRequest: 128,
-			MemoryLimit:   256,
-		},
-	})
+	patch, err := generateYAMLPatch(resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1,
+		CPULimit:      0.2,
+		MemoryRequest: 128,
+		MemoryLimit:   256,
+	}))
 	if err != nil {
 		t.Fatalf("generateYAMLPatch() error = %v", err)
 	}
@@ -48,39 +41,25 @@ func TestGenerateYAMLPatchUsesResolvedDeploymentAndContainer(t *testing.T) {
 }
 
 func TestGenerateYAMLPatchClearsLimitsDisabledByPolicy(t *testing.T) {
-	patch, err := generateYAMLPatch(Result{
-		Namespace: "shop",
-		Workload: kubernetes.Workload{
-			DeploymentName: "payments-api",
-			ContainerName:  "worker",
-		},
-		Recommendations: recommender.Recommendations{
-			CPURequest:    0.1,
-			MemoryRequest: 128,
-			MemoryLimit:   256,
-		},
-	})
+	patch, err := generateYAMLPatch(resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1,
+		MemoryRequest: 128,
+		MemoryLimit:   256,
+	}))
 	if err != nil {
 		t.Fatalf("generateYAMLPatch() error = %v", err)
 	}
-	if strings.Contains(patch, "cpu: \"0m\"") {
+	if strings.Contains(patch, "cpu: 0m") {
 		t.Fatalf("patch contains a disabled CPU limit:\n%s", patch)
 	}
-	if !strings.Contains(patch, "limits:\n            cpu: null\n            memory: \"256Mi\"") {
+	if !strings.Contains(patch, "limits:\n            cpu: null\n            memory: 256Mi") {
 		t.Fatalf("patch does not preserve enabled memory limit:\n%s", patch)
 	}
 
-	patch, err = generateYAMLPatch(Result{
-		Namespace: "shop",
-		Workload: kubernetes.Workload{
-			DeploymentName: "payments-api",
-			ContainerName:  "worker",
-		},
-		Recommendations: recommender.Recommendations{
-			CPURequest:    0.1,
-			MemoryRequest: 128,
-		},
-	})
+	patch, err = generateYAMLPatch(resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1,
+		MemoryRequest: 128,
+	}))
 	if err != nil {
 		t.Fatalf("generateYAMLPatch() without limits error = %v", err)
 	}
@@ -90,26 +69,31 @@ func TestGenerateYAMLPatchClearsLimitsDisabledByPolicy(t *testing.T) {
 }
 
 func TestGenerateYAMLPatchRoundsUpToPreserveBuffers(t *testing.T) {
-	patch, err := generateYAMLPatch(Result{
-		Namespace: "shop",
-		Workload: kubernetes.Workload{
-			DeploymentName: "payments-api",
-			ContainerName:  "worker",
-		},
-		Recommendations: recommender.Recommendations{
-			CPURequest:    0.1001,
-			CPULimit:      0.2001,
-			MemoryRequest: 128.1,
-			MemoryLimit:   256.1,
-		},
-	})
+	patch, err := generateYAMLPatch(resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1001,
+		CPULimit:      0.2001,
+		MemoryRequest: 128.1,
+		MemoryLimit:   256.1,
+	}))
 	if err != nil {
 		t.Fatalf("generateYAMLPatch() error = %v", err)
 	}
-	for _, expected := range []string{`cpu: "101m"`, `cpu: "201m"`, `memory: "129Mi"`, `memory: "257Mi"`} {
+	for _, expected := range []string{`cpu: 101m`, `cpu: 201m`, `memory: 129Mi`, `memory: 257Mi`} {
 		if !strings.Contains(patch, expected) {
 			t.Fatalf("patch does not contain rounded-up %q:\n%s", expected, patch)
 		}
+	}
+}
+
+func TestGenerateYAMLPatchRejectsMismatchedWorkload(t *testing.T) {
+	result := resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1,
+		MemoryRequest: 128,
+	})
+	result.Workload.ContainerName = "sidecar"
+	_, err := generateYAMLPatch(result)
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("generateYAMLPatch() error = %v, want identity mismatch", err)
 	}
 }
 
@@ -134,18 +118,11 @@ func TestGenerateYAMLPatchRemovesDisabledLimitWhenApplied(t *testing.T) {
 			},
 		},
 	}
-	patch, err := generateYAMLPatch(Result{
-		Namespace: "shop",
-		Workload: kubernetes.Workload{
-			DeploymentName: "payments-api",
-			ContainerName:  "worker",
-		},
-		Recommendations: recommender.Recommendations{
-			CPURequest:    0.1,
-			MemoryRequest: 128,
-			MemoryLimit:   256,
-		},
-	})
+	patch, err := generateYAMLPatch(resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1,
+		MemoryRequest: 128,
+		MemoryLimit:   256,
+	}))
 	if err != nil {
 		t.Fatalf("generateYAMLPatch() error = %v", err)
 	}
@@ -178,17 +155,10 @@ func TestGenerateYAMLPatchRemovesDisabledLimitWhenApplied(t *testing.T) {
 }
 
 func TestStructuredOutputWritesOnlyRequestedDocumentToStdout(t *testing.T) {
-	result := Result{
-		Namespace: "shop",
-		Workload: kubernetes.Workload{
-			DeploymentName: "payments-api",
-			ContainerName:  "worker",
-		},
-		Recommendations: recommender.Recommendations{
-			CPURequest:    0.1,
-			MemoryRequest: 128,
-		},
-	}
+	result := resultWithPatch(t, recommender.Recommendations{
+		CPURequest:    0.1,
+		MemoryRequest: 128,
+	})
 	for _, format := range []string{"json", "yaml"} {
 		t.Run(format, func(t *testing.T) {
 			useTemporaryWorkingDirectory(t)
@@ -221,16 +191,40 @@ func TestPrintResultsReturnsPatchWriteFailure(t *testing.T) {
 		t.Fatalf("create blocking directory: %v", err)
 	}
 	_, err := captureStdout(func() error {
-		return PrintResults(Result{
-			Namespace: "shop",
-			Workload: kubernetes.Workload{
-				DeploymentName: "payments-api",
-				ContainerName:  "worker",
-			},
-		}, "yaml")
+		return PrintResults(resultWithPatch(t, recommender.Recommendations{
+			CPURequest:    0.1,
+			MemoryRequest: 128,
+		}), "yaml")
 	})
 	if err == nil || !strings.Contains(err.Error(), "write resource-patch.yaml") {
 		t.Fatalf("PrintResults() error = %v, want patch write failure", err)
+	}
+}
+
+func resultWithPatch(t *testing.T, recommendation recommender.Recommendations) Result {
+	t.Helper()
+	workload := kubernetes.Workload{
+		DeploymentName: "payments-api",
+		ContainerName:  "worker",
+	}
+	patch, err := kubernetes.NewResourcePatch(
+		"shop",
+		workload,
+		kubernetes.ResourceSettings{
+			CPURequest:    recommendation.CPURequest,
+			CPULimit:      recommendation.CPULimit,
+			MemoryRequest: recommendation.MemoryRequest,
+			MemoryLimit:   recommendation.MemoryLimit,
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewResourcePatch() error = %v", err)
+	}
+	return Result{
+		Namespace:       "shop",
+		Workload:        workload,
+		Recommendations: recommendation,
+		ResourcePatch:   patch,
 	}
 }
 

@@ -16,7 +16,6 @@ import (
 	corek8s "github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
 	coreloadtest "github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
 	coremetrics "github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
-	coreoutput "github.com/BogdanDolia/pod-rightsizer/pkg/output"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
 	"github.com/google/uuid"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
@@ -77,6 +76,8 @@ type RunStatus struct {
 	Advice         []string                `json:"advice,omitempty"`
 	Workload       corek8s.Workload        `json:"workload,omitempty"`
 	LoadTest       *coreloadtest.RunResult `json:"loadTest,omitempty"`
+	PatchDryRun    bool                    `json:"patchDryRun"`
+	patchYAML      string
 }
 
 type analysisKubernetesClient interface {
@@ -94,6 +95,12 @@ type analysisKubernetesClient interface {
 		namespace string,
 		workload corek8s.Workload,
 	) (corek8s.ContainerMetrics, error)
+	PrepareResourcePatch(
+		ctx context.Context,
+		namespace string,
+		workload corek8s.Workload,
+		desired corek8s.ResourceSettings,
+	) (*corek8s.ResourcePatch, error)
 }
 
 type analysisLoadTester interface {
@@ -484,6 +491,26 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		s.finishWithError(id, fmt.Errorf("generate recommendation: %w", err))
 		return
 	}
+	resourcePatch, err := k8sClient.PrepareResourcePatch(
+		operationCtx,
+		req.Namespace,
+		workload,
+		corek8s.ResourceSettings{
+			CPURequest:    recommendation.CPURequest,
+			CPULimit:      recommendation.CPULimit,
+			MemoryRequest: recommendation.MemoryRequest,
+			MemoryLimit:   recommendation.MemoryLimit,
+		},
+	)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("server-side dry-run resource patch: %w", err))
+		return
+	}
+	patchYAML, err := resourcePatch.YAML()
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("serialize resource patch: %w", err))
+		return
+	}
 	advice := knowledge.Evaluate(independentSamples, recommendation)
 	completed := time.Now().UTC()
 	s.updateRun(id, func(run *RunStatus) {
@@ -494,6 +521,8 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		run.Recommendation = recommendation
 		run.Advice = advice
 		run.Workload = workload
+		run.PatchDryRun = true
+		run.patchYAML = string(patchYAML)
 		if req.TargetURL != "" {
 			resultCopy := loadTestResult
 			run.LoadTest = &resultCopy
@@ -729,29 +758,12 @@ func (s *Server) handleGetYamlPatch(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
-	// Extract recommendation
-	rec, ok := run.Recommendation.(recommender.Recommendations)
-	if !ok {
-		// In case of JSON-marshaled type, try to re-map via json
-		var tmp recommender.Recommendations
-		b, _ := json.Marshal(run.Recommendation)
-		_ = json.Unmarshal(b, &tmp)
-		rec = tmp
+	if !run.PatchDryRun || run.patchYAML == "" {
+		http.Error(w, "resource patch did not pass server-side dry-run", http.StatusConflict)
+		return
 	}
-
-	ns := run.Request.Namespace
-	name := run.Workload.DeploymentName
-	if name == "" {
-		name = run.Request.Deployment
-	}
-	container := run.Workload.ContainerName
-	if container == "" {
-		container = run.Request.Container
-	}
-
-	yaml := generateResourcePatchYAML(ns, name, container, rec)
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	_, _ = io.WriteString(w, yaml)
+	_, _ = io.WriteString(w, run.patchYAML)
 }
 
 func (s *Server) handleGetHPABehavior(w http.ResponseWriter, r *http.Request, id string) {
@@ -763,16 +775,6 @@ func (s *Server) handleGetHPABehavior(w http.ResponseWriter, r *http.Request, id
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	// Basic default behavior; UI can customize later
 	_, _ = io.WriteString(w, defaultHPABehaviorYAML())
-}
-
-func generateResourcePatchYAML(
-	namespace, deploy, container string,
-	r recommender.Recommendations,
-) string {
-	return strings.TrimSuffix(
-		coreoutput.GenerateResourcePatch(namespace, deploy, container, r),
-		"\n",
-	)
 }
 
 func defaultHPABehaviorYAML() string {

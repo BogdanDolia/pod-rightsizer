@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pod-rightsizer-e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rightsizer-e2e
+  namespace: pod-rightsizer-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rightsizer-e2e
+  template:
+    metadata:
+      labels:
+        app: rightsizer-e2e
+    spec:
+      containers:
+        - name: target
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+        - name: sidecar
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 20m
+              memory: 32Mi

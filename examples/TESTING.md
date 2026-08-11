@@ -160,6 +160,10 @@ echo "=== YAML Patch ==="
 curl -s "http://localhost:8080/api/runs/$RUN_ID/yaml-patch"
 
 echo ""
+echo "=== Server-side dry-run status ==="
+curl -s "http://localhost:8080/api/runs/$RUN_ID" | jq '.patchDryRun'
+
+echo ""
 echo "=== HPA Behavior ==="
 curl -s "http://localhost:8080/api/runs/$RUN_ID/hpa-behavior"
 ```

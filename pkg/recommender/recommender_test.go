@@ -1,6 +1,7 @@
 package recommender
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -9,105 +10,150 @@ import (
 	"github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
 )
 
-func TestGenerateRecommendations(t *testing.T) {
-	baseTime := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
-	// Setup test metrics data
-	testMetrics := []metrics.ResourceMetrics{
-		{
-			ContainerName: "worker",
-			Timestamp:     baseTime,
-			Window:        15 * time.Second,
-			CPUUsage:      0.1, // 100m
-			MemoryUsage:   100, // 100Mi
-		},
-		{
-			ContainerName: "worker",
-			Timestamp:     baseTime.Add(15 * time.Second),
-			Window:        15 * time.Second,
-			CPUUsage:      0.15, // 150m
-			MemoryUsage:   120,  // 120Mi
-		},
-		{
-			ContainerName: "worker",
-			Timestamp:     baseTime.Add(30 * time.Second),
-			Window:        15 * time.Second,
-			CPUUsage:      0.2, // 200m
-			MemoryUsage:   150, // 150Mi
-		},
+func TestGenerateRecommendationsUsesCPUPercentileAndMemoryHighWater(t *testing.T) {
+	samples := sampleSeries(20, func(index int) (float64, float64) {
+		if index == 19 {
+			return 10.0, 500
+		}
+		return float64(index+1) / 10, float64(100 + index*10)
+	})
+	current := kubernetes.ResourceSettings{
+		CPURequest:    1.5,
+		CPULimit:      3,
+		MemoryRequest: 400,
+		MemoryLimit:   800,
 	}
+	policy := DefaultPolicy()
+	policy.CPUPercentile = 90
+	policy.CPURequestBufferPercent = 10
+	policy.MemoryBufferPercent = 20
 
-	// Current settings
-	currentSettings := kubernetes.ResourceSettings{
-		CPURequest:    0.1, // 100m
-		CPULimit:      0.3, // 300m
-		MemoryRequest: 128, // 128Mi
-		MemoryLimit:   256, // 256Mi
-	}
-
-	// Test with 20% margin
-	margin := 20
-	recommendations, err := GenerateRecommendations(testMetrics, currentSettings, margin, 3)
+	recommendation, err := GenerateRecommendations(samples, current, policy)
 	if err != nil {
 		t.Fatalf("GenerateRecommendations() error = %v", err)
 	}
 
-	// Expected results (with 20% margin):
-	// Avg CPU: (0.1 + 0.15 + 0.2) / 3 = 0.15, with 20% margin = 0.18
-	// Peak CPU: 0.2, with 20% margin = 0.24
-	// Avg Memory: (100 + 120 + 150) / 3 = 123.33, with 20% margin = 148
-	// Peak Memory: 150, with 20% margin = 180
-
-	// Test CPU request (tolerance for floating point comparison)
-	if diff := abs(recommendations.CPURequest - 0.18); diff > 0.001 {
-		t.Errorf("CPU Request: got %.3f, want %.3f", recommendations.CPURequest, 0.18)
+	// Nearest-rank p90 is the 18th sorted CPU value (1.8 cores); request adds 10%.
+	assertClose(t, recommendation.Observed.CPUPercentileValue, 1.8)
+	assertClose(t, recommendation.CPURequest, 1.98)
+	assertClose(t, recommendation.Observed.MemoryHighWater, 500)
+	assertClose(t, recommendation.MemoryRequest, 600)
+	if recommendation.CPULimit != 0 {
+		t.Fatalf("CPU limit = %.3f, want omitted", recommendation.CPULimit)
 	}
+	assertClose(t, recommendation.MemoryLimit, 720)
 
-	// Test CPU limit
-	if diff := abs(recommendations.CPULimit - 0.24); diff > 0.001 {
-		t.Errorf("CPU Limit: got %.3f, want %.3f", recommendations.CPULimit, 0.24)
+	if recommendation.Comparison.CPURequest.Direction != "increase" {
+		t.Fatalf("CPU comparison = %#v, want increase", recommendation.Comparison.CPURequest)
 	}
-
-	// Test Memory request (tolerance for floating point comparison)
-	if diff := abs(recommendations.MemoryRequest - 148); diff > 0.5 {
-		t.Errorf("Memory Request: got %.1f, want %.1f", recommendations.MemoryRequest, 148.0)
+	if recommendation.Comparison.CPULimit.Direction != "decrease" {
+		t.Fatalf("CPU limit comparison = %#v, want decrease", recommendation.Comparison.CPULimit)
 	}
-
-	// Test Memory limit
-	if diff := abs(recommendations.MemoryLimit - 180); diff > 0.5 {
-		t.Errorf("Memory Limit: got %.1f, want %.1f", recommendations.MemoryLimit, 180.0)
+	if recommendation.Comparison.MemoryRequest.Direction != "increase" {
+		t.Fatalf("memory comparison = %#v, want increase", recommendation.Comparison.MemoryRequest)
 	}
+	if len(recommendation.Explanation) < 5 ||
+		!strings.Contains(strings.Join(recommendation.Explanation, " "), "high-water mark") {
+		t.Fatalf("Explanation = %#v, want calculation audit trail", recommendation.Explanation)
+	}
+}
 
-	// Test minimum values
-	smallMetrics := []metrics.ResourceMetrics{
+func TestLimitPolicies(t *testing.T) {
+	samples := sampleSeries(3, func(index int) (float64, float64) {
+		return float64(index+1) / 10, float64(100 + index*10)
+	})
+	current := kubernetes.ResourceSettings{CPULimit: 0.8, MemoryLimit: 512}
+
+	tests := []struct {
+		name       string
+		cpu        LimitPolicy
+		memory     LimitPolicy
+		wantCPU    float64
+		wantMemory float64
+	}{
 		{
-			ContainerName: "worker",
-			Timestamp:     baseTime,
-			Window:        15 * time.Second,
-			CPUUsage:      0.001, // 1m (very small)
-			MemoryUsage:   10,    // 10Mi (very small)
+			name:       "none",
+			cpu:        LimitPolicy{Mode: LimitNone},
+			memory:     LimitPolicy{Mode: LimitNone},
+			wantCPU:    0,
+			wantMemory: 0,
+		},
+		{
+			name:       "keep",
+			cpu:        LimitPolicy{Mode: LimitKeep},
+			memory:     LimitPolicy{Mode: LimitKeep},
+			wantCPU:    0.8,
+			wantMemory: 512,
+		},
+		{
+			name:       "request multiplier",
+			cpu:        LimitPolicy{Mode: LimitRequestMultiplier, Multiplier: 2},
+			memory:     LimitPolicy{Mode: LimitRequestMultiplier, Multiplier: 1.5},
+			wantCPU:    0.66,
+			wantMemory: 216,
+		},
+		{
+			name:       "peak multiplier",
+			cpu:        LimitPolicy{Mode: LimitPeakMultiplier, Multiplier: 1.5},
+			memory:     LimitPolicy{Mode: LimitPeakMultiplier, Multiplier: 2},
+			wantCPU:    0.45,
+			wantMemory: 240,
 		},
 	}
 
-	minRecommendations, err := GenerateRecommendations(smallMetrics, currentSettings, margin, 1)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := DefaultPolicy()
+			policy.CPULimit = test.cpu
+			policy.MemoryLimit = test.memory
+			recommendation, err := GenerateRecommendations(samples, current, policy)
+			if err != nil {
+				t.Fatalf("GenerateRecommendations() error = %v", err)
+			}
+			assertClose(t, recommendation.CPULimit, test.wantCPU)
+			assertClose(t, recommendation.MemoryLimit, test.wantMemory)
+		})
+	}
+}
+
+func TestLimitNeverFallsBelowRequest(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.CPULimit = LimitPolicy{Mode: LimitKeep}
+	policy.MemoryLimit = LimitPolicy{Mode: LimitPeakMultiplier, Multiplier: 1}
+	recommendation, err := GenerateRecommendations(
+		sampleSeries(3, func(int) (float64, float64) { return 0.2, 100 }),
+		kubernetes.ResourceSettings{CPULimit: 0.01},
+		policy,
+	)
 	if err != nil {
-		t.Fatalf("GenerateRecommendations() minimum values error = %v", err)
+		t.Fatalf("GenerateRecommendations() error = %v", err)
 	}
-
-	// Should use minimum values, not the actual calculated ones
-	if minRecommendations.CPURequest < 0.01 {
-		t.Errorf("Min CPU Request not enforced: got %.3f, want at least 0.01", minRecommendations.CPURequest)
+	if recommendation.CPULimit < recommendation.CPURequest {
+		t.Fatalf("CPU limit %.3f is below request %.3f", recommendation.CPULimit, recommendation.CPURequest)
 	}
-
-	if minRecommendations.CPULimit < 0.05 {
-		t.Errorf("Min CPU Limit not enforced: got %.3f, want at least 0.05", minRecommendations.CPULimit)
+	if recommendation.MemoryLimit < recommendation.MemoryRequest {
+		t.Fatalf("memory limit %.1f is below request %.1f", recommendation.MemoryLimit, recommendation.MemoryRequest)
 	}
-
-	if minRecommendations.MemoryRequest < 32 {
-		t.Errorf("Min Memory Request not enforced: got %.1f, want at least 32", minRecommendations.MemoryRequest)
+	if !strings.Contains(strings.Join(recommendation.Explanation, " "), "then is normalized") {
+		t.Fatalf("explanation does not disclose limit normalization: %#v", recommendation.Explanation)
 	}
+}
 
-	if minRecommendations.MemoryLimit < 64 {
-		t.Errorf("Min Memory Limit not enforced: got %.1f, want at least 64", minRecommendations.MemoryLimit)
+func TestKeepLimitExplanationDisclosesResourceFloor(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.CPULimit = LimitPolicy{Mode: LimitKeep}
+	recommendation, err := GenerateRecommendations(
+		sampleSeries(3, func(int) (float64, float64) { return 0.005, 100 }),
+		kubernetes.ResourceSettings{CPULimit: 0.02},
+		policy,
+	)
+	if err != nil {
+		t.Fatalf("GenerateRecommendations() error = %v", err)
+	}
+	joined := strings.Join(recommendation.Explanation, " ")
+	if !strings.Contains(joined, "current value 0.02") ||
+		!strings.Contains(joined, "resource floor") {
+		t.Fatalf("explanation does not disclose keep normalization: %#v", recommendation.Explanation)
 	}
 }
 
@@ -124,67 +170,80 @@ func TestGenerateRecommendationsRequiresIndependentSamples(t *testing.T) {
 	_, err := GenerateRecommendations(
 		[]metrics.ResourceMetrics{duplicate, duplicate, duplicate},
 		kubernetes.ResourceSettings{},
-		20,
-		3,
+		DefaultPolicy(),
 	)
 	if err == nil || !strings.Contains(err.Error(), "got 1, need at least 3") {
 		t.Fatalf("GenerateRecommendations() error = %v, want independent sample error", err)
 	}
 }
 
-func TestGenerateRecommendationsDoesNotCountOverlappingSourceWindows(t *testing.T) {
+func TestGenerateRecommendationsRejectsInvalidPolicyAndUsage(t *testing.T) {
+	samples := sampleSeries(3, func(int) (float64, float64) { return 0.1, 100 })
+
+	invalidPercentile := DefaultPolicy()
+	invalidPercentile.CPUPercentile = 0
+	if _, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, invalidPercentile); err == nil {
+		t.Fatal("GenerateRecommendations() accepted zero CPU percentile")
+	}
+
+	invalidLimit := DefaultPolicy()
+	invalidLimit.CPULimit = LimitPolicy{Mode: LimitRequestMultiplier, Multiplier: 0.9}
+	if _, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, invalidLimit); err == nil {
+		t.Fatal("GenerateRecommendations() accepted a limit multiplier below 1")
+	}
+
+	samples[1].MemoryUsage = math.NaN()
+	if _, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, DefaultPolicy()); err == nil {
+		t.Fatal("GenerateRecommendations() accepted NaN memory usage")
+	}
+}
+
+func TestConfidenceReflectsEvidenceQuantityAndDuration(t *testing.T) {
+	low, err := GenerateRecommendations(
+		sampleSeries(3, func(int) (float64, float64) { return 0.1, 100 }),
+		kubernetes.ResourceSettings{},
+		DefaultPolicy(),
+	)
+	if err != nil {
+		t.Fatalf("low-confidence recommendation error = %v", err)
+	}
+	if low.Confidence.Level != "low" {
+		t.Fatalf("low confidence = %#v, want low", low.Confidence)
+	}
+
+	highSamples := sampleSeries(30, func(int) (float64, float64) { return 0.1, 100 })
+	for index := range highSamples {
+		highSamples[index].Timestamp = highSamples[0].Timestamp.Add(time.Duration(index) * time.Minute)
+		highSamples[index].Window = time.Minute
+	}
+	high, err := GenerateRecommendations(highSamples, kubernetes.ResourceSettings{}, DefaultPolicy())
+	if err != nil {
+		t.Fatalf("high-confidence recommendation error = %v", err)
+	}
+	if high.Confidence.Level != "high" || high.Confidence.Score != 1 {
+		t.Fatalf("high confidence = %#v, want high score 1", high.Confidence)
+	}
+}
+
+func sampleSeries(count int, values func(int) (float64, float64)) []metrics.ResourceMetrics {
 	baseTime := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
-	samples := []metrics.ResourceMetrics{
-		{
+	samples := make([]metrics.ResourceMetrics, count)
+	for index := range samples {
+		cpu, memory := values(index)
+		samples[index] = metrics.ResourceMetrics{
 			ContainerName: "worker",
-			Timestamp:     baseTime,
-			Window:        30 * time.Second,
-			CPUUsage:      0.1,
-			MemoryUsage:   100,
-		},
-		{
-			ContainerName: "worker",
-			Timestamp:     baseTime.Add(15 * time.Second),
-			Window:        30 * time.Second,
-			CPUUsage:      0.2,
-			MemoryUsage:   200,
-		},
+			Timestamp:     baseTime.Add(time.Duration(index) * 15 * time.Second),
+			Window:        15 * time.Second,
+			CPUUsage:      cpu,
+			MemoryUsage:   memory,
+		}
 	}
-
-	_, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, 20, 2)
-	if err == nil || !strings.Contains(err.Error(), "got 1, need at least 2") {
-		t.Fatalf("GenerateRecommendations() error = %v, want overlapping-window sample error", err)
-	}
+	return samples
 }
 
-func TestGenerateRecommendationsRejectsMixedContainers(t *testing.T) {
-	timestamp := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
-	samples := []metrics.ResourceMetrics{
-		{
-			ContainerName: "worker",
-			Timestamp:     timestamp,
-			Window:        15 * time.Second,
-			CPUUsage:      0.1,
-			MemoryUsage:   100,
-		},
-		{
-			ContainerName: "sidecar",
-			Timestamp:     timestamp.Add(15 * time.Second),
-			Window:        15 * time.Second,
-			CPUUsage:      0.9,
-			MemoryUsage:   500,
-		},
+func assertClose(t *testing.T, got, want float64) {
+	t.Helper()
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("got %.10f, want %.10f", got, want)
 	}
-
-	_, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, 20, 2)
-	if err == nil || !strings.Contains(err.Error(), "calculate each container separately") {
-		t.Fatalf("GenerateRecommendations() error = %v, want mixed-container error", err)
-	}
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
 }

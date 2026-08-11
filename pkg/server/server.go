@@ -16,6 +16,7 @@ import (
 	corek8s "github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
 	coreloadtest "github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
 	coremetrics "github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
+	coreoutput "github.com/BogdanDolia/pod-rightsizer/pkg/output"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
 	"github.com/google/uuid"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
@@ -31,29 +32,30 @@ const (
 	maximumAnalysisDuration = 24 * time.Hour
 	analysisCleanupTimeout  = 30 * time.Second
 	defaultSamplingInterval = 5 * time.Second
+	maximumPublicationGrace = 2 * time.Minute
 	maximumRPS              = 10_000
 	maximumConcurrency      = 1_000
 	defaultMinimumRPSRatio  = 0.95
 	defaultMaximumErrorPct  = 1.0
 	defaultMaximumP95       = time.Second
+	maximumAnalyzeBodyBytes = 1 << 20
 )
 
 // AnalyzeRequest represents the input payload for a new analysis run.
 type AnalyzeRequest struct {
-	Namespace   string `json:"namespace"`
-	Deployment  string `json:"deployment"`
-	Container   string `json:"container"`
-	ServiceName string `json:"serviceName,omitempty"`
-	Duration    string `json:"duration"` // e.g. "2m"
-	RPS         int    `json:"rps,omitempty"`
-	Concurrency int    `json:"concurrency,omitempty"`
-	Margin      int    `json:"margin"`
-	TargetURL   string `json:"targetURL,omitempty"`
+	Namespace   string              `json:"namespace"`
+	Deployment  string              `json:"deployment"`
+	Container   string              `json:"container"`
+	ServiceName string              `json:"serviceName,omitempty"`
+	Duration    string              `json:"duration"` // e.g. "2m"
+	RPS         int                 `json:"rps,omitempty"`
+	Concurrency int                 `json:"concurrency,omitempty"`
+	Policy      *recommender.Policy `json:"policy,omitempty"`
+	TargetURL   string              `json:"targetURL,omitempty"`
 
 	MinimumActualRPS     float64  `json:"minimumActualRPS,omitempty"`
 	MaximumHTTPErrorRate *float64 `json:"maximumHTTPErrorRate,omitempty"`
 	MaximumP95Latency    string   `json:"maximumP95Latency,omitempty"`
-	MinimumSamples       int      `json:"minimumSamples,omitempty"`
 }
 
 // AnalyzeResponse contains the created run identifier.
@@ -198,9 +200,16 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maximumAnalyzeBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
 	var req AnalyzeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decoder.Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid body: expected one JSON object", http.StatusBadRequest)
 		return
 	}
 	if err := validateAnalyzeRequest(req); err != nil {
@@ -259,7 +268,7 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 	duration := analysisDuration(req.Duration)
 	operationCtx, cancelOperation := context.WithTimeout(
 		parentCtx,
-		duration+analysisCleanupTimeout,
+		duration+maximumPublicationGrace+analysisCleanupTimeout,
 	)
 	defer cancelOperation()
 
@@ -292,12 +301,13 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 	collector := coremetrics.NewCollector(k8sClient, req.Namespace, workload)
 	analysisCtx, cancelAnalysis := context.WithCancel(operationCtx)
 	defer cancelAnalysis()
-	measurementCtx, stopMeasurement := context.WithTimeout(analysisCtx, duration)
-	defer stopMeasurement()
+	measurementStartedAt := time.Now().UTC()
 
 	type loadTestOutcome struct {
-		result coreloadtest.RunResult
-		err    error
+		result     coreloadtest.RunResult
+		err        error
+		startedAt  time.Time
+		finishedAt time.Time
 	}
 	var loadTestDone <-chan loadTestOutcome
 	if req.TargetURL != "" {
@@ -307,11 +317,20 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		go func() {
 			defer func() {
 				if value := recover(); value != nil {
-					done <- loadTestOutcome{err: fmt.Errorf("load test panic: %v", value)}
+					done <- loadTestOutcome{
+						err:        fmt.Errorf("load test panic: %v", value),
+						finishedAt: time.Now().UTC(),
+					}
 				}
 			}()
+			startedAt := time.Now().UTC()
 			result, runErr := tester.Run(analysisCtx, duration)
-			done <- loadTestOutcome{result: result, err: runErr}
+			done <- loadTestOutcome{
+				result:     result,
+				err:        runErr,
+				startedAt:  startedAt,
+				finishedAt: time.Now().UTC(),
+			}
 		}()
 	}
 
@@ -319,16 +338,45 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 	var metricsErr error
 	var loadTestErr error
 	var loadTestResult coreloadtest.RunResult
+	var loadTestStartedAt time.Time
+	var loadTestFinishedAt time.Time
 	loadTestFinished := loadTestDone == nil
 	ticker := time.NewTicker(s.samplingInterval)
 	defer ticker.Stop()
+	var measurementDone <-chan time.Time
+	var measurementTimer *time.Timer
+	if loadTestDone == nil {
+		measurementTimer = time.NewTimer(duration)
+		measurementDone = measurementTimer.C
+		defer measurementTimer.Stop()
+	}
+	var publicationDone <-chan time.Time
+	var publicationTimer *time.Timer
+	defer func() {
+		if publicationTimer != nil {
+			publicationTimer.Stop()
+		}
+	}()
+	var measurementFinishedAt time.Time
+
+	startPublicationGrace := func() bool {
+		grace, graceErr := metricsPublicationGrace(samples, s.samplingInterval)
+		if graceErr != nil {
+			metricsErr = graceErr
+			cancelAnalysis()
+			return false
+		}
+		publicationTimer = time.NewTimer(grace)
+		publicationDone = publicationTimer.C
+		return true
+	}
 
 	for collect := true; collect; {
-		sample, err := collector.CollectMetrics(measurementCtx)
+		sample, err := collector.CollectMetrics(analysisCtx)
 		switch {
 		case err == nil:
 			samples = append(samples, sample)
-		case measurementCtx.Err() == nil:
+		case analysisCtx.Err() == nil:
 			metricsErr = err
 			cancelAnalysis()
 			collect = false
@@ -338,17 +386,29 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		}
 
 		select {
-		case <-measurementCtx.Done():
-			collect = false
 		case outcome := <-loadTestDone:
 			loadTestDone = nil
 			loadTestFinished = true
 			loadTestResult = outcome.result
 			loadTestErr = outcome.err
+			loadTestStartedAt = outcome.startedAt
+			loadTestFinishedAt = outcome.finishedAt
 			if loadTestErr != nil {
 				cancelAnalysis()
 				collect = false
+				continue
 			}
+			measurementFinishedAt = loadTestFinishedAt
+			collect = startPublicationGrace()
+		case <-measurementDone:
+			measurementDone = nil
+			measurementFinishedAt = measurementStartedAt.Add(duration)
+			collect = startPublicationGrace()
+		case <-publicationDone:
+			publicationDone = nil
+			collect = false
+		case <-analysisCtx.Done():
+			collect = false
 		case <-ticker.C:
 		}
 	}
@@ -357,6 +417,8 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		outcome := <-loadTestDone
 		loadTestResult = outcome.result
 		loadTestErr = outcome.err
+		loadTestStartedAt = outcome.startedAt
+		loadTestFinishedAt = outcome.finishedAt
 	}
 
 	if err := parentCtx.Err(); err != nil {
@@ -389,21 +451,34 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 			return
 		}
 	}
+	measurementIntervalStart := measurementStartedAt
+	if req.TargetURL != "" {
+		measurementIntervalStart = loadTestStartedAt
+	}
+	containedSamples, filterErr := coremetrics.FullyContainedSamples(
+		samples,
+		measurementIntervalStart,
+		measurementFinishedAt,
+	)
+	if filterErr != nil {
+		s.finishWithError(id, fmt.Errorf("filter metrics to measurement interval: %w", filterErr))
+		return
+	}
+	samples = containedSamples
 
 	independentSamples, err := coremetrics.IndependentSamples(samples)
 	if err != nil {
 		s.finishWithError(id, fmt.Errorf("validate metrics: %w", err))
 		return
 	}
-	minimumSamples := req.MinimumSamples
-	if minimumSamples == 0 {
-		minimumSamples = recommender.DefaultMinimumSamples
+	policy := recommender.DefaultPolicy()
+	if req.Policy != nil {
+		policy = *req.Policy
 	}
 	recommendation, err := recommender.GenerateRecommendations(
 		independentSamples,
 		currentSettings,
-		req.Margin,
-		minimumSamples,
+		policy,
 	)
 	if err != nil {
 		s.finishWithError(id, fmt.Errorf("generate recommendation: %w", err))
@@ -415,7 +490,7 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		run.Status = statusComplete
 		run.CompletedAt = &completed
 		run.Error = ""
-		run.MetricsSamples = len(independentSamples)
+		run.MetricsSamples = recommendation.Observed.IndependentSamples
 		run.Recommendation = recommendation
 		run.Advice = advice
 		run.Workload = workload
@@ -451,9 +526,6 @@ func validateAnalyzeRequest(req AnalyzeRequest) error {
 	if duration > maximumAnalysisDuration {
 		return fmt.Errorf("duration must not exceed %s", maximumAnalysisDuration)
 	}
-	if req.Margin < 0 || req.Margin > 100 {
-		return errors.New("margin must be between 0 and 100")
-	}
 	if req.RPS < 0 || req.RPS > maximumRPS {
 		return fmt.Errorf("rps must be between 0 and %d", maximumRPS)
 	}
@@ -462,6 +534,9 @@ func validateAnalyzeRequest(req AnalyzeRequest) error {
 	}
 	if req.TargetURL != "" && req.RPS == 0 && req.Concurrency == 0 {
 		return errors.New("rps or concurrency must be positive when targetURL is set")
+	}
+	if req.RPS > 0 && req.Concurrency > 0 {
+		return errors.New("rps and concurrency are mutually exclusive")
 	}
 	if math.IsNaN(req.MinimumActualRPS) ||
 		math.IsInf(req.MinimumActualRPS, 0) ||
@@ -481,8 +556,10 @@ func validateAnalyzeRequest(req AnalyzeRequest) error {
 			return errors.New("maximumP95Latency must be a positive Go duration")
 		}
 	}
-	if req.MinimumSamples != 0 && req.MinimumSamples < 2 {
-		return errors.New("minimumSamples must be at least 2")
+	if req.Policy != nil {
+		if err := req.Policy.Validate(); err != nil {
+			return fmt.Errorf("invalid policy: %w", err)
+		}
 	}
 	return nil
 }
@@ -516,6 +593,28 @@ func analysisDuration(value string) time.Duration {
 		return maximumAnalysisDuration
 	}
 	return duration
+}
+
+func metricsPublicationGrace(
+	samples []coremetrics.ResourceMetrics,
+	samplingInterval time.Duration,
+) (time.Duration, error) {
+	if samplingInterval <= 0 {
+		return 0, errors.New("sampling interval must be greater than zero")
+	}
+	resolution := coremetrics.SourceResolution(samples)
+	if resolution <= 0 {
+		return 0, errors.New("metrics source did not report a positive window")
+	}
+	if resolution > maximumPublicationGrace-samplingInterval {
+		return 0, fmt.Errorf(
+			"metrics source window %s plus polling interval %s exceeds maximum publication grace %s",
+			resolution,
+			samplingInterval,
+			maximumPublicationGrace,
+		)
+	}
+	return resolution + samplingInterval, nil
 }
 
 func (s *Server) finishWithError(id string, err error) {
@@ -666,41 +765,14 @@ func (s *Server) handleGetHPABehavior(w http.ResponseWriter, r *http.Request, id
 	_, _ = io.WriteString(w, defaultHPABehaviorYAML())
 }
 
-func formatCPUToMilli(cores float64) int {
-	// Round to nearest milli
-	return int(cores*1000 + 0.5)
-}
-
-func formatMemToMi(mi float64) int {
-	return int(mi + 0.5)
-}
-
 func generateResourcePatchYAML(
 	namespace, deploy, container string,
 	r recommender.Recommendations,
 ) string {
-	reqCPU := formatCPUToMilli(r.CPURequest)
-	limCPU := formatCPUToMilli(r.CPULimit)
-	reqMem := formatMemToMi(r.MemoryRequest)
-	limMem := formatMemToMi(r.MemoryLimit)
-
-	return fmt.Sprintf(`apiVersion: apps/v1
-kind: Deployment
-metadata:
-  namespace: %s
-  name: %s
-spec:
-  template:
-    spec:
-      containers:
-      - name: %s
-        resources:
-          requests:
-            cpu: "%dm"
-            memory: "%dMi"
-          limits:
-            cpu: "%dm"
-            memory: "%dMi"`, namespace, deploy, container, reqCPU, reqMem, limCPU, limMem)
+	return strings.TrimSuffix(
+		coreoutput.GenerateResourcePatch(namespace, deploy, container, r),
+		"\n",
+	)
 }
 
 func defaultHPABehaviorYAML() string {

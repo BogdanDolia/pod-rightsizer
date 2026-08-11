@@ -23,20 +23,26 @@ import (
 
 // Config holds the CLI configuration
 type Config struct {
-	Target               string // Load test target
-	DeploymentName       string // Kubernetes Deployment to right-size
-	ContainerName        string // Container within the Deployment to right-size
-	Namespace            string
-	Duration             time.Duration
-	RPS                  int
-	Concurrency          int
-	MinimumActualRPS     float64
-	MaximumHTTPErrorRate float64
-	MaximumP95Latency    time.Duration
-	Margin               int
-	MinimumSamples       int
-	OutputFormat         string
-	KubeconfigPath       string
+	Target                  string // Load test target
+	DeploymentName          string // Kubernetes Deployment to right-size
+	ContainerName           string // Container within the Deployment to right-size
+	Namespace               string
+	Duration                time.Duration
+	RPS                     int
+	Concurrency             int
+	MinimumActualRPS        float64
+	MaximumHTTPErrorRate    float64
+	MaximumP95Latency       time.Duration
+	CPUPercentile           float64
+	CPURequestBufferPercent float64
+	MemoryBufferPercent     float64
+	CPULimitMode            recommender.LimitMode
+	CPULimitMultiplier      float64
+	MemoryLimitMode         recommender.LimitMode
+	MemoryLimitMultiplier   float64
+	MinimumSamples          int
+	OutputFormat            string
+	KubeconfigPath          string
 }
 
 const (
@@ -44,16 +50,16 @@ const (
 	maximumLoadTestDuration    = 24 * time.Hour
 	maximumRPS                 = 10_000
 	maximumConcurrency         = 1_000
-	minimumMargin              = 0
-	maximumMargin              = 100
 	defaultMinimumRPSRatio     = 0.95
 	defaultMaximumErrorPercent = 1.0
 	defaultMaximumP95Latency   = time.Second
 )
 
 type loadTestOutcome struct {
-	Result loadtest.RunResult
-	Err    error
+	Result     loadtest.RunResult
+	Err        error
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 func main() {
@@ -76,7 +82,7 @@ func main() {
 	}
 
 	// Resolve the Deployment's real pod selector and validate the target container.
-	fmt.Printf("Resolving deployment '%s' and container '%s' in namespace '%s'...\n",
+	fmt.Fprintf(os.Stderr, "Resolving deployment '%s' and container '%s' in namespace '%s'...\n",
 		cfg.DeploymentName, cfg.ContainerName, cfg.Namespace)
 	workload, err := k8sClient.ResolveWorkload(
 		ctx,
@@ -90,7 +96,7 @@ func main() {
 	}
 
 	// Get initial resource settings to compare against
-	fmt.Println("Fetching current resource settings...")
+	fmt.Fprintln(os.Stderr, "Fetching current resource settings...")
 	currentSettings, err := k8sClient.GetResourceSettings(ctx, cfg.Namespace, workload)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting current resource settings: %v\n", err)
@@ -98,16 +104,20 @@ func main() {
 	}
 
 	// Initialize metrics collector
-	fmt.Printf("Initializing metrics collector for deployment '%s', container '%s'...\n",
+	fmt.Fprintf(os.Stderr, "Initializing metrics collector for deployment '%s', container '%s'...\n",
 		workload.DeploymentName, workload.ContainerName)
 	metricsCollector := metrics.NewCollector(k8sClient, cfg.Namespace, workload)
 
 	// Initialize load tester
-	fmt.Println("Initializing load test...")
+	fmt.Fprintln(os.Stderr, "Initializing load test...")
 	loadTester := loadtest.NewTester(cfg.Target, cfg.RPS, cfg.Concurrency)
 
 	// Run load test and collect metrics
-	fmt.Printf("Starting load test (%d RPS for %s)...\n", cfg.RPS, cfg.Duration)
+	loadMode := fmt.Sprintf("%d RPS", cfg.RPS)
+	if cfg.Concurrency > 0 {
+		loadMode = fmt.Sprintf("%d concurrent workers", cfg.Concurrency)
+	}
+	fmt.Fprintf(os.Stderr, "Starting load test (%s for %s)...\n", loadMode, cfg.Duration)
 	metricsChan := make(chan metrics.ResourceMetrics)
 	metricsErrChan := make(chan error, 1)
 
@@ -128,8 +138,14 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		startedAt := time.Now().UTC()
 		result, err := loadTester.Run(ctx, cfg.Duration)
-		resultChan <- loadTestOutcome{Result: result, Err: err}
+		resultChan <- loadTestOutcome{
+			Result:     result,
+			Err:        err,
+			StartedAt:  startedAt,
+			FinishedAt: time.Now().UTC(),
+		}
 	}()
 
 	// Collect metrics and fail the entire run on either a source error or a load
@@ -137,6 +153,8 @@ func main() {
 	var allMetrics []metrics.ResourceMetrics
 	var runErr error
 	var loadTestResult loadtest.RunResult
+	var loadTestStartedAt time.Time
+	var loadTestFinishedAt time.Time
 	loadTestFinished := false
 	var finalMetricsTimer *time.Timer
 	var finalMetricsDone <-chan time.Time
@@ -150,7 +168,8 @@ collectionLoop:
 				continue
 			}
 			allMetrics = append(allMetrics, m)
-			fmt.Printf(
+			fmt.Fprintf(
+				os.Stderr,
 				"Collected metrics for container %s - CPU: %.1fm, Memory: %.1fMi (source: %s, window: %s)\n",
 				m.ContainerName,
 				m.CPUUsage*1000,
@@ -165,18 +184,21 @@ collectionLoop:
 			loadTestFinished = true
 			resultChan = nil
 			loadTestResult = outcome.Result
+			loadTestStartedAt = outcome.StartedAt
+			loadTestFinishedAt = outcome.FinishedAt
 			if outcome.Err != nil {
 				runErr = fmt.Errorf("load test failed: %w", outcome.Err)
 				break collectionLoop
 			}
 
-			fmt.Println("Load test completed successfully.")
+			fmt.Fprintln(os.Stderr, "Load test completed successfully.")
 			resolution := metrics.SourceResolution(allMetrics)
 			if resolution <= 0 {
 				break collectionLoop
 			}
 			// Give the source one complete window plus one poll interval to
-			// publish the final snapshot that overlaps the load test.
+			// publish a final snapshot whose source window is fully contained
+			// in the load test.
 			finalMetricsTimer = time.NewTimer(resolution + minimumMetricsPollInterval)
 			finalMetricsDone = finalMetricsTimer.C
 		case <-finalMetricsDone:
@@ -214,13 +236,21 @@ collectionLoop:
 		fmt.Fprintln(os.Stderr, "Cannot generate recommendations: load test did not complete")
 		os.Exit(1)
 	}
-
-	fmt.Println("Analyzing metrics and generating recommendations...")
-	recommendations, err := buildRecommendations(
+	measurementMetrics, err := metrics.FullyContainedSamples(
 		allMetrics,
+		loadTestStartedAt,
+		loadTestFinishedAt,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot validate measurement window: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintln(os.Stderr, "Analyzing metrics and generating recommendations...")
+	recommendations, err := buildRecommendations(
+		measurementMetrics,
 		currentSettings,
-		cfg.Margin,
-		cfg.MinimumSamples,
+		recommendationPolicy(cfg),
 		runErr,
 		loadTestResult,
 		loadTestSLO(cfg),
@@ -237,32 +267,42 @@ collectionLoop:
 		Workload:        workload,
 		Duration:        cfg.Duration,
 		RPS:             cfg.RPS,
+		Concurrency:     cfg.Concurrency,
 		LoadTest:        loadTestResult,
 		LoadTestSLO:     loadTestSLO(cfg),
 		CurrentSettings: currentSettings,
-		Metrics:         allMetrics,
+		Metrics:         measurementMetrics,
 		Recommendations: recommendations,
 	}
 
-	output.PrintResults(result, cfg.OutputFormat)
+	if err := output.PrintResults(result, cfg.OutputFormat); err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot write results: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func parseFlags() Config {
 	var (
-		target               = flag.String("target", "", "Target service URL or identifier for load testing")
-		deploymentName       = flag.String("deployment", "", "Kubernetes Deployment to right-size")
-		containerName        = flag.String("container", "", "Container within the Deployment to right-size")
-		namespace            = flag.String("namespace", "default", "Kubernetes namespace")
-		durationStr          = flag.String("duration", "5m", "Duration of the load test (positive, maximum 24h)")
-		rps                  = flag.Int("rps", 50, "Requests per second for load testing (maximum 10000)")
-		concurrency          = flag.Int("concurrency", 0, "Alternative to RPS, number of concurrent connections (maximum 1000)")
-		minimumActualRPS     = flag.Float64("min-actual-rps", 0, "Minimum actual RPS SLO (default: 95% of --rps; disabled by default in concurrency mode)")
-		maximumHTTPErrorRate = flag.Float64("max-http-error-rate", defaultMaximumErrorPercent, "Maximum HTTP error rate SLO as a percentage (0-100)")
-		maximumP95Latency    = flag.Duration("max-p95-latency", defaultMaximumP95Latency, "Maximum p95 latency SLO")
-		margin               = flag.Int("margin", 20, "Safety margin percentage to add to recommendations (0-100)")
-		minimumSamples       = flag.Int("min-samples", recommender.DefaultMinimumSamples, "Minimum number of non-overlapping Metrics API samples")
-		outputFormat         = flag.String("output-format", "text", "Output format: text, json, or yaml")
-		kubeconfigPath       = flag.String("kubeconfig", "", "Path to kubeconfig file for external cluster access")
+		target                = flag.String("target", "", "Target service URL or identifier for load testing")
+		deploymentName        = flag.String("deployment", "", "Kubernetes Deployment to right-size")
+		containerName         = flag.String("container", "", "Container within the Deployment to right-size")
+		namespace             = flag.String("namespace", "default", "Kubernetes namespace")
+		durationStr           = flag.String("duration", "5m", "Duration of the load test (positive, maximum 24h)")
+		rps                   = flag.Int("rps", 50, "Requests per second for load testing (maximum 10000)")
+		concurrency           = flag.Int("concurrency", 0, "Alternative to RPS, number of concurrent connections (maximum 1000)")
+		minimumActualRPS      = flag.Float64("min-actual-rps", 0, "Minimum actual RPS SLO (default: 95% of --rps; disabled by default in concurrency mode)")
+		maximumHTTPErrorRate  = flag.Float64("max-http-error-rate", defaultMaximumErrorPercent, "Maximum HTTP error rate SLO as a percentage (0-100)")
+		maximumP95Latency     = flag.Duration("max-p95-latency", defaultMaximumP95Latency, "Maximum p95 latency SLO")
+		cpuPercentile         = flag.Float64("cpu-percentile", recommender.DefaultCPUPercentile, "CPU percentile used for the request (0-100]")
+		cpuRequestBuffer      = flag.Float64("cpu-request-buffer", recommender.DefaultCPURequestBufferPercent, "Buffer added to the CPU percentile as a percentage")
+		memoryBuffer          = flag.Float64("memory-buffer", recommender.DefaultMemoryBufferPercent, "Buffer added to the memory high-water mark as a percentage")
+		cpuLimitMode          = flag.String("cpu-limit-policy", string(recommender.LimitNone), "CPU limit policy: none, keep, request-multiplier, or peak-multiplier")
+		cpuLimitMultiplier    = flag.Float64("cpu-limit-multiplier", 1.0, "CPU multiplier for multiplier limit policies")
+		memoryLimitMode       = flag.String("memory-limit-policy", string(recommender.LimitRequestMultiplier), "Memory limit policy: none, keep, request-multiplier, or peak-multiplier")
+		memoryLimitMultiplier = flag.Float64("memory-limit-multiplier", recommender.DefaultMemoryLimitMultiplier, "Memory multiplier for multiplier limit policies")
+		minimumSamples        = flag.Int("min-samples", recommender.DefaultMinimumSamples, "Minimum number of non-overlapping Metrics API samples")
+		outputFormat          = flag.String("output-format", "text", "Output format: text, json, or yaml")
+		kubeconfigPath        = flag.String("kubeconfig", "", "Path to kubeconfig file for external cluster access")
 	)
 
 	flag.Parse()
@@ -278,20 +318,26 @@ func parseFlags() Config {
 	}
 
 	cfg := Config{
-		Target:               *target,
-		DeploymentName:       *deploymentName,
-		ContainerName:        *containerName,
-		Namespace:            *namespace,
-		Duration:             duration,
-		RPS:                  *rps,
-		Concurrency:          *concurrency,
-		MinimumActualRPS:     *minimumActualRPS,
-		MaximumHTTPErrorRate: *maximumHTTPErrorRate,
-		MaximumP95Latency:    *maximumP95Latency,
-		Margin:               *margin,
-		MinimumSamples:       *minimumSamples,
-		OutputFormat:         *outputFormat,
-		KubeconfigPath:       *kubeconfigPath,
+		Target:                  *target,
+		DeploymentName:          *deploymentName,
+		ContainerName:           *containerName,
+		Namespace:               *namespace,
+		Duration:                duration,
+		RPS:                     *rps,
+		Concurrency:             *concurrency,
+		MinimumActualRPS:        *minimumActualRPS,
+		MaximumHTTPErrorRate:    *maximumHTTPErrorRate,
+		MaximumP95Latency:       *maximumP95Latency,
+		CPUPercentile:           *cpuPercentile,
+		CPURequestBufferPercent: *cpuRequestBuffer,
+		MemoryBufferPercent:     *memoryBuffer,
+		CPULimitMode:            recommender.LimitMode(*cpuLimitMode),
+		CPULimitMultiplier:      *cpuLimitMultiplier,
+		MemoryLimitMode:         recommender.LimitMode(*memoryLimitMode),
+		MemoryLimitMultiplier:   *memoryLimitMultiplier,
+		MinimumSamples:          *minimumSamples,
+		OutputFormat:            *outputFormat,
+		KubeconfigPath:          *kubeconfigPath,
 	}
 	if err := validateConfig(cfg); err != nil {
 		_, writeErr := fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -341,10 +387,6 @@ func validateConfig(cfg Config) error {
 	if cfg.Duration > maximumLoadTestDuration {
 		return fmt.Errorf("--duration must not exceed %s", maximumLoadTestDuration)
 	}
-	if cfg.Margin < minimumMargin || cfg.Margin > maximumMargin {
-		return fmt.Errorf("--margin must be between %d and %d", minimumMargin, maximumMargin)
-	}
-
 	if cfg.RPS < 0 {
 		return errors.New("--rps must not be negative")
 	}
@@ -359,6 +401,9 @@ func validateConfig(cfg Config) error {
 	}
 	if cfg.RPS == 0 && cfg.Concurrency == 0 {
 		return errors.New("either --rps or --concurrency must be greater than zero")
+	}
+	if cfg.RPS > 0 && cfg.Concurrency > 0 {
+		return errors.New("--rps and --concurrency are mutually exclusive")
 	}
 	if math.IsNaN(cfg.MinimumActualRPS) || math.IsInf(cfg.MinimumActualRPS, 0) || cfg.MinimumActualRPS < 0 {
 		return errors.New("--min-actual-rps must be a finite non-negative number")
@@ -375,6 +420,9 @@ func validateConfig(cfg Config) error {
 
 	if cfg.MinimumSamples < 2 {
 		return errors.New("--min-samples must be at least 2")
+	}
+	if err := recommendationPolicy(cfg).Validate(); err != nil {
+		return fmt.Errorf("invalid recommendation policy: %w", err)
 	}
 	if cfg.OutputFormat != "text" && cfg.OutputFormat != "json" && cfg.OutputFormat != "yaml" {
 		return errors.New("--output-format must be one of: text, json, yaml")
@@ -413,7 +461,6 @@ func collectMetrics(
 	defer timer.Stop()
 
 	var lastObserved metrics.ResourceMetrics
-	var lastEmitted metrics.ResourceMetrics
 	for {
 		select {
 		case <-ctx.Done():
@@ -455,13 +502,13 @@ func collectMetrics(
 
 		if lastObserved.Timestamp.IsZero() || sample.Timestamp.After(lastObserved.Timestamp) {
 			lastObserved = sample
-			if lastEmitted.Timestamp.IsZero() || metrics.IsIndependentAfter(lastEmitted, sample) {
-				select {
-				case metricsChan <- sample:
-					lastEmitted = sample
-				case <-ctx.Done():
-					return
-				}
+			// Preserve every new source snapshot. IndependentSamples later keeps
+			// overlapping windows from inflating evidence while retaining their
+			// conservative CPU and memory maxima.
+			select {
+			case metricsChan <- sample:
+			case <-ctx.Done():
+				return
 			}
 		}
 
@@ -484,8 +531,7 @@ func nextMetricsPollDelay(sample metrics.ResourceMetrics, now time.Time) time.Du
 func buildRecommendations(
 	samples []metrics.ResourceMetrics,
 	currentSettings kubernetes.ResourceSettings,
-	margin int,
-	minimumSamples int,
+	policy recommender.Policy,
 	runErr error,
 	loadTestResult loadtest.RunResult,
 	slo loadtest.SLO,
@@ -503,7 +549,24 @@ func buildRecommendations(
 			strings.Join(assessment.Violations, "; "),
 		)
 	}
-	return recommender.GenerateRecommendations(samples, currentSettings, margin, minimumSamples)
+	return recommender.GenerateRecommendations(samples, currentSettings, policy)
+}
+
+func recommendationPolicy(cfg Config) recommender.Policy {
+	return recommender.Policy{
+		CPUPercentile:           cfg.CPUPercentile,
+		CPURequestBufferPercent: cfg.CPURequestBufferPercent,
+		MemoryBufferPercent:     cfg.MemoryBufferPercent,
+		CPULimit: recommender.LimitPolicy{
+			Mode:       cfg.CPULimitMode,
+			Multiplier: cfg.CPULimitMultiplier,
+		},
+		MemoryLimit: recommender.LimitPolicy{
+			Mode:       cfg.MemoryLimitMode,
+			Multiplier: cfg.MemoryLimitMultiplier,
+		},
+		MinimumSamples: cfg.MinimumSamples,
+	}
 }
 
 func loadTestSLO(cfg Config) loadtest.SLO {

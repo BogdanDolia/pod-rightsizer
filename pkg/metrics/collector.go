@@ -66,6 +66,18 @@ func (c *Collector) CollectMetrics(ctx context.Context) (ResourceMetrics, error)
 // removes repeated polls of the same Metrics API snapshot. Repeated snapshots
 // do not increase the amount of evidence used for a recommendation.
 func IndependentSamples(samples []ResourceMetrics) ([]ResourceMetrics, error) {
+	unique, err := validatedUniqueSamples(samples)
+	if err != nil {
+		return nil, err
+	}
+	return nonOverlappingSamples(unique), nil
+}
+
+// validatedUniqueSamples validates source metadata, refuses to mix
+// containers, removes duplicate polls, and returns samples in source timestamp
+// order. It deliberately does not discard overlapping windows so callers can
+// apply their own measurement-boundary filter first.
+func validatedUniqueSamples(samples []ResourceMetrics) ([]ResourceMetrics, error) {
 	if len(samples) == 0 {
 		return nil, nil
 	}
@@ -120,16 +132,60 @@ func IndependentSamples(samples []ResourceMetrics) ([]ResourceMetrics, error) {
 		return independent[i].Timestamp.Before(independent[j].Timestamp)
 	})
 
-	nonOverlapping := independent[:0]
-	for _, sample := range independent {
+	return independent, nil
+}
+
+// FullyContainedSamples returns independent source windows that fall entirely
+// within a measured workload interval. Windows that overlap pre-load or
+// post-load time are excluded rather than attributing unmeasured traffic to the
+// recommendation.
+func FullyContainedSamples(
+	samples []ResourceMetrics,
+	intervalStart, intervalEnd time.Time,
+) ([]ResourceMetrics, error) {
+	if intervalStart.IsZero() || intervalEnd.IsZero() || !intervalEnd.After(intervalStart) {
+		return nil, fmt.Errorf("measurement interval must have a non-zero end after its start")
+	}
+
+	unique, err := validatedUniqueSamples(samples)
+	if err != nil {
+		return nil, err
+	}
+	contained := make([]ResourceMetrics, 0, len(unique))
+	for _, sample := range unique {
+		sourceStart := sample.Timestamp.Add(-sample.Window)
+		if sourceStart.Before(intervalStart) || sample.Timestamp.After(intervalEnd) {
+			continue
+		}
+		contained = append(contained, sample)
+	}
+	return nonOverlappingSamples(contained), nil
+}
+
+func nonOverlappingSamples(samples []ResourceMetrics) []ResourceMetrics {
+	if len(samples) == 0 {
+		return nil
+	}
+	nonOverlapping := make([]ResourceMetrics, 0, len(samples))
+	for _, sample := range samples {
 		if len(nonOverlapping) > 0 &&
 			!IsIndependentAfter(nonOverlapping[len(nonOverlapping)-1], sample) {
+			// The overlapping source window cannot add independent evidence, but
+			// silently dropping it could hide a short CPU or memory high-water
+			// mark. Conservatively retain its resource maxima in the existing
+			// evidence window without increasing the sample count.
+			previous := &nonOverlapping[len(nonOverlapping)-1]
+			if sample.CPUUsage > previous.CPUUsage {
+				previous.CPUUsage = sample.CPUUsage
+			}
+			if sample.MemoryUsage > previous.MemoryUsage {
+				previous.MemoryUsage = sample.MemoryUsage
+			}
 			continue
 		}
 		nonOverlapping = append(nonOverlapping, sample)
 	}
-
-	return nonOverlapping, nil
+	return nonOverlapping
 }
 
 // IsIndependentAfter reports whether current's source measurement window does

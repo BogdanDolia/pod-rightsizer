@@ -138,9 +138,7 @@ func TestAnalysisPassesDeadlineContextsToKubernetes(t *testing.T) {
 		"namespace":"default",
 		"deployment":"api",
 		"container":"app",
-		"duration":"20ms",
-		"margin":20,
-		"minimumSamples":2
+		"duration":"20ms"
 	}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
 	response := httptest.NewRecorder()
@@ -180,8 +178,7 @@ func TestAnalyzeRejectsMissingContainer(t *testing.T) {
 		bytes.NewBufferString(`{
 			"namespace":"default",
 			"deployment":"api",
-			"duration":"20ms",
-			"margin":20
+			"duration":"20ms"
 		}`),
 	)
 	response := httptest.NewRecorder()
@@ -197,6 +194,75 @@ func TestAnalyzeRejectsMissingContainer(t *testing.T) {
 	defer cancel()
 	if err := api.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
+	}
+}
+
+func TestAnalyzeRejectsUnknownLegacyFieldsAndInvalidPolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "legacy margin is not silently ignored",
+			body: `{
+				"namespace":"default",
+				"deployment":"api",
+				"container":"app",
+				"duration":"1s",
+				"margin":20
+			}`,
+			want: "unknown field",
+		},
+		{
+			name: "invalid policy",
+			body: `{
+				"namespace":"default",
+				"deployment":"api",
+				"container":"app",
+				"duration":"1s",
+				"policy":{
+					"cpuPercentile":0,
+					"cpuRequestBufferPercent":10,
+					"memoryBufferPercent":20,
+					"cpuLimit":{"mode":"none"},
+					"memoryLimit":{"mode":"request-multiplier","multiplier":1.2},
+					"minimumSamples":3
+				}
+			}`,
+			want: "invalid policy",
+		},
+		{
+			name: "ambiguous load mode",
+			body: `{
+				"namespace":"default",
+				"deployment":"api",
+				"container":"app",
+				"duration":"1s",
+				"targetURL":"http://example.test",
+				"rps":50,
+				"concurrency":2
+			}`,
+			want: "rps and concurrency are mutually exclusive",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			api := New()
+			response := httptest.NewRecorder()
+			api.ServeHTTP(
+				response,
+				httptest.NewRequest(http.MethodPost, "/api/analyze", bytes.NewBufferString(test.body)),
+			)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("status/body = %d/%q, want 400 containing %q", response.Code, response.Body.String(), test.want)
+			}
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := api.Shutdown(shutdownCtx); err != nil {
+				t.Fatalf("Shutdown() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -230,12 +296,10 @@ func TestAnalysisRejectsPartialMetricsAfterError(t *testing.T) {
 		Status:    statusCreated,
 		CreatedAt: time.Now().UTC(),
 		Request: AnalyzeRequest{
-			Namespace:      "default",
-			Deployment:     "api",
-			Container:      "app",
-			Duration:       "50ms",
-			Margin:         20,
-			MinimumSamples: 2,
+			Namespace:  "default",
+			Deployment: "api",
+			Container:  "app",
+			Duration:   "50ms",
 		},
 	}
 	if !api.startAnalysis(initial) {
@@ -253,20 +317,22 @@ func TestAnalysisRejectsPartialMetricsAfterError(t *testing.T) {
 	}
 }
 
-func TestGenerateResourcePatchUsesResolvedContainer(t *testing.T) {
+func TestGenerateResourcePatchUsesResolvedContainerAndClearsDisabledLimit(t *testing.T) {
 	patch := generateResourcePatchYAML(
 		"default",
 		"api",
 		"worker",
 		recommender.Recommendations{
 			CPURequest:    0.1,
-			CPULimit:      0.2,
 			MemoryRequest: 64,
 			MemoryLimit:   128,
 		},
 	)
 	if !strings.Contains(patch, "name: worker") {
 		t.Fatalf("patch = %q, want resolved container", patch)
+	}
+	if !strings.Contains(patch, "limits:\n            cpu: null\n            memory: \"128Mi\"") {
+		t.Fatalf("patch = %q, want disabled CPU limit cleared", patch)
 	}
 }
 
@@ -341,6 +407,277 @@ func TestLoadTestPanicBecomesFailedRun(t *testing.T) {
 	run := waitForTerminalRun(t, api, initial.RunID)
 	if run.Status != statusFailed || !strings.Contains(run.Error, "load test panic: load test exploded") {
 		t.Fatalf("run = %#v, want recovered load-test panic failure", run)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := api.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+}
+
+func TestFailedLoadTestSLOSuppressesRecommendationAndPatch(t *testing.T) {
+	api := New()
+	api.samplingInterval = time.Millisecond
+	api.newKubernetesClient = func() (analysisKubernetesClient, error) {
+		return &fakeKubernetesClient{
+			getResourceSettings: func(context.Context) (corek8s.ResourceSettings, error) {
+				return corek8s.ResourceSettings{}, nil
+			},
+			getPodMetrics: func(context.Context) (corek8s.ContainerMetrics, error) {
+				return corek8s.ContainerMetrics{
+					ContainerName: "app",
+					Timestamp:     time.Now().UTC(),
+					Window:        time.Nanosecond,
+					CPUUsage:      0.1,
+					MemoryUsage:   64,
+				}, nil
+			},
+		}, nil
+	}
+	api.newLoadTester = func(string, int, int) analysisLoadTester {
+		return fakeLoadTester(func(context.Context, time.Duration) (coreloadtest.RunResult, error) {
+			time.Sleep(10 * time.Millisecond)
+			return coreloadtest.RunResult{
+				Requests:          100,
+				HTTPErrors:        100,
+				ActualRPS:         100,
+				HTTPErrorRate:     1,
+				P95Latency:        time.Millisecond,
+				Duration:          10 * time.Millisecond,
+				TerminationReason: coreloadtest.TerminationDurationElapsed,
+			}, nil
+		})
+	}
+
+	initial := RunStatus{
+		RunID:     "failed-slo-run",
+		Status:    statusCreated,
+		CreatedAt: time.Now().UTC(),
+		Request: AnalyzeRequest{
+			Namespace:  "default",
+			Deployment: "api",
+			Container:  "app",
+			Duration:   "30ms",
+			RPS:        50,
+			TargetURL:  "http://example.test",
+		},
+	}
+	if !api.startAnalysis(initial) {
+		t.Fatal("startAnalysis() = false")
+	}
+	run := waitForTerminalRun(t, api, initial.RunID)
+	if run.Status != statusFailed || !strings.Contains(run.Error, "did not meet SLO") {
+		t.Fatalf("run = %#v, want failed SLO", run)
+	}
+	if run.Recommendation != nil {
+		t.Fatalf("recommendation = %#v, want none after failed SLO", run.Recommendation)
+	}
+
+	response := httptest.NewRecorder()
+	api.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/api/runs/"+initial.RunID+"/yaml-patch", nil),
+	)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("YAML patch status = %d, want %d", response.Code, http.StatusConflict)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := api.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+}
+
+func TestAnalysisUsesOnlyMetricsWindowsInsideLoadTest(t *testing.T) {
+	api := New()
+	api.samplingInterval = 2 * time.Millisecond
+	loadStarted := make(chan struct{})
+	var loadStart time.Time
+	var metricCall atomic.Int64
+
+	api.newKubernetesClient = func() (analysisKubernetesClient, error) {
+		return &fakeKubernetesClient{
+			getResourceSettings: func(context.Context) (corek8s.ResourceSettings, error) {
+				return corek8s.ResourceSettings{}, nil
+			},
+			getPodMetrics: func(context.Context) (corek8s.ContainerMetrics, error) {
+				<-loadStarted
+				call := metricCall.Add(1)
+				snapshot := corek8s.ContainerMetrics{
+					ContainerName: "app",
+					CPUUsage:      0.1,
+					MemoryUsage:   64,
+					Window:        5 * time.Millisecond,
+				}
+				switch call {
+				case 1:
+					snapshot.Timestamp = loadStart.Add(time.Millisecond)
+					snapshot.Window = 10 * time.Millisecond
+					snapshot.CPUUsage = 10
+					snapshot.MemoryUsage = 1000
+				case 2, 3, 4:
+					snapshot.Timestamp = loadStart.Add(time.Duration(call-1) * 10 * time.Millisecond)
+				default:
+					snapshot.Timestamp = loadStart.Add(70 * time.Millisecond)
+					snapshot.CPUUsage = 8
+					snapshot.MemoryUsage = 800
+				}
+				return snapshot, nil
+			},
+		}, nil
+	}
+	api.newLoadTester = func(string, int, int) analysisLoadTester {
+		return fakeLoadTester(func(context.Context, time.Duration) (coreloadtest.RunResult, error) {
+			loadStart = time.Now().UTC()
+			close(loadStarted)
+			time.Sleep(60 * time.Millisecond)
+			return coreloadtest.RunResult{
+				Requests:          3000,
+				ActualRPS:         50,
+				P95Latency:        time.Millisecond,
+				Duration:          60 * time.Millisecond,
+				TerminationReason: coreloadtest.TerminationDurationElapsed,
+			}, nil
+		})
+	}
+	policy := recommender.DefaultPolicy()
+	policy.CPURequestBufferPercent = 0
+	policy.MemoryBufferPercent = 0
+	policy.MemoryLimit.Multiplier = 1
+	initial := RunStatus{
+		RunID:     "window-filter-run",
+		Status:    statusCreated,
+		CreatedAt: time.Now().UTC(),
+		Request: AnalyzeRequest{
+			Namespace:  "default",
+			Deployment: "api",
+			Container:  "app",
+			Duration:   "80ms",
+			RPS:        50,
+			TargetURL:  "http://example.test",
+			Policy:     &policy,
+		},
+	}
+	if !api.startAnalysis(initial) {
+		t.Fatal("startAnalysis() = false")
+	}
+	run := waitForTerminalRun(t, api, initial.RunID)
+	if run.Status != statusComplete {
+		t.Fatalf("run = %#v, want completed", run)
+	}
+	recommendation, ok := run.Recommendation.(recommender.Recommendations)
+	if !ok {
+		t.Fatalf("recommendation type = %T, want recommender.Recommendations", run.Recommendation)
+	}
+	if recommendation.CPURequest != 0.1 || recommendation.MemoryRequest != 64 {
+		t.Fatalf("recommendation = %#v, want only in-load low samples", recommendation)
+	}
+	if recommendation.Observed.IndependentSamples != 3 {
+		t.Fatalf("independent samples = %d, want 3", recommendation.Observed.IndependentSamples)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := api.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+}
+
+func TestAnalysisCollectsFinalWindowPublishedAfterLoadTest(t *testing.T) {
+	api := New()
+	api.samplingInterval = 2 * time.Millisecond
+	loadStarted := make(chan struct{})
+	finalAvailable := make(chan struct{})
+	var loadStart time.Time
+	var loadEnd time.Time
+
+	api.newKubernetesClient = func() (analysisKubernetesClient, error) {
+		return &fakeKubernetesClient{
+			getResourceSettings: func(context.Context) (corek8s.ResourceSettings, error) {
+				return corek8s.ResourceSettings{}, nil
+			},
+			getPodMetrics: func(context.Context) (corek8s.ContainerMetrics, error) {
+				<-loadStarted
+				snapshot := corek8s.ContainerMetrics{
+					ContainerName: "app",
+					Timestamp:     time.Now().UTC(),
+					Window:        3 * time.Millisecond,
+					CPUUsage:      0.1,
+					MemoryUsage:   64,
+				}
+				select {
+				case <-finalAvailable:
+					snapshot.Timestamp = loadEnd
+					snapshot.CPUUsage = 1
+					snapshot.MemoryUsage = 1024
+				default:
+				}
+				return snapshot, nil
+			},
+		}, nil
+	}
+	api.newLoadTester = func(string, int, int) analysisLoadTester {
+		return fakeLoadTester(func(ctx context.Context, duration time.Duration) (coreloadtest.RunResult, error) {
+			loadStart = time.Now().UTC()
+			close(loadStarted)
+			timer := time.NewTimer(duration)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return coreloadtest.RunResult{}, ctx.Err()
+			case <-timer.C:
+			}
+			loadEnd = time.Now().UTC()
+			go func() {
+				time.Sleep(2 * time.Millisecond)
+				close(finalAvailable)
+			}()
+			return coreloadtest.RunResult{
+				Requests:          2000,
+				ActualRPS:         50,
+				P95Latency:        time.Millisecond,
+				Duration:          duration,
+				TerminationReason: coreloadtest.TerminationDurationElapsed,
+			}, nil
+		})
+	}
+	policy := recommender.DefaultPolicy()
+	policy.CPUPercentile = 100
+	policy.CPURequestBufferPercent = 0
+	policy.MemoryBufferPercent = 0
+	policy.MinimumSamples = 2
+	initial := RunStatus{
+		RunID:     "late-final-window-run",
+		Status:    statusCreated,
+		CreatedAt: time.Now().UTC(),
+		Request: AnalyzeRequest{
+			Namespace:  "default",
+			Deployment: "api",
+			Container:  "app",
+			Duration:   "40ms",
+			RPS:        50,
+			TargetURL:  "http://example.test",
+			Policy:     &policy,
+		},
+	}
+	if !api.startAnalysis(initial) {
+		t.Fatal("startAnalysis() = false")
+	}
+	run := waitForTerminalRun(t, api, initial.RunID)
+	if run.Status != statusComplete {
+		t.Fatalf("run = %#v, want completed", run)
+	}
+	recommendation, ok := run.Recommendation.(recommender.Recommendations)
+	if !ok {
+		t.Fatalf("recommendation type = %T, want recommender.Recommendations", run.Recommendation)
+	}
+	if recommendation.CPURequest != 1 || recommendation.MemoryRequest != 1024 {
+		t.Fatalf("recommendation = %#v, want delayed final high-water sample", recommendation)
+	}
+	if !loadEnd.After(loadStart) {
+		t.Fatalf("load interval = %s..%s, want positive duration", loadStart, loadEnd)
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)

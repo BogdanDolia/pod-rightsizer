@@ -15,9 +15,5 @@ type Sample struct {
 // MetricsProvider defines an interface for collecting resource usage samples.
 // The since parameter represents the observation window to collect fresh samples for.
 type MetricsProvider interface {
-	Collect(
-		ctx context.Context,
-		namespace, deployment, container string,
-		since time.Duration,
-	) ([]Sample, error)
+	Collect(ctx context.Context, namespace, deployment, container string, since time.Duration) ([]Sample, error)
 }

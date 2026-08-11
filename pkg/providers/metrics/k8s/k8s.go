@@ -10,9 +10,21 @@ import (
 
 // Provider implements MetricsProvider using Kubernetes Metrics API.
 type Provider struct {
-	client *corek8s.Client
+	client kubernetesClient
 	// samplingInterval controls how often to query the metrics server within the window.
 	samplingInterval time.Duration
+}
+
+type kubernetesClient interface {
+	ResolveWorkload(
+		ctx context.Context,
+		namespace, deploymentName, containerName string,
+	) (corek8s.Workload, error)
+	GetPodMetrics(
+		ctx context.Context,
+		namespace string,
+		workload corek8s.Workload,
+	) (corek8s.ContainerMetrics, error)
 }
 
 // New returns a new Kubernetes metrics provider.
@@ -29,11 +41,7 @@ func New(kubeconfigPath string, samplingInterval time.Duration) (*Provider, erro
 }
 
 // Collect samples current resource usage over the given observation window.
-func (p *Provider) Collect(
-	ctx context.Context,
-	namespace, deployment, container string,
-	since time.Duration,
-) ([]providermetrics.Sample, error) {
+func (p *Provider) Collect(ctx context.Context, namespace, deployment, container string, since time.Duration) ([]providermetrics.Sample, error) {
 	if since <= 0 {
 		since = 30 * time.Second
 	}
@@ -52,13 +60,14 @@ func (p *Provider) Collect(
 	for {
 		// Collect one sample immediately on first iteration
 		snapshot, err := p.client.GetPodMetrics(ctx, namespace, workload)
-		if err == nil {
-			samples = append(samples, providermetrics.Sample{
-				Timestamp: snapshot.Timestamp,
-				CPUm:      snapshot.CPUUsage * 1000.0,
-				MemoryMi:  snapshot.MemoryUsage,
-			})
+		if err != nil {
+			return nil, err
 		}
+		samples = append(samples, providermetrics.Sample{
+			Timestamp: snapshot.Timestamp,
+			CPUm:      snapshot.CPUUsage * 1000.0, // convert cores to millicores
+			MemoryMi:  snapshot.MemoryUsage,
+		})
 
 		if time.Now().After(deadline) {
 			break

@@ -92,6 +92,23 @@ func TestRunReturnsTypedResult(t *testing.T) {
 	}
 }
 
+func TestRunRejectsAmbiguousLoadMode(t *testing.T) {
+	result, err := NewTester("http://example.test", 10, 2).Run(
+		context.Background(),
+		time.Second,
+	)
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("Run() error = %v, want mutually exclusive modes", err)
+	}
+	if result.TerminationReason != TerminationInvalidConfiguration {
+		t.Fatalf(
+			"TerminationReason = %q, want %q",
+			result.TerminationReason,
+			TerminationInvalidConfiguration,
+		)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

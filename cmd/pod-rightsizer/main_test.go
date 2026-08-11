@@ -10,6 +10,7 @@ import (
 	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
+	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
 )
 
 func TestBuildRecommendationsRejectsRunError(t *testing.T) {
@@ -23,8 +24,7 @@ func TestBuildRecommendationsRejectsRunError(t *testing.T) {
 	_, err := buildRecommendations(
 		samples,
 		kubernetes.ResourceSettings{},
-		20,
-		3,
+		recommender.DefaultPolicy(),
 		errors.New("metrics API unavailable"),
 		loadtest.RunResult{},
 		loadtest.SLO{},
@@ -52,8 +52,7 @@ func TestBuildRecommendationsRejectsFailedLoadTestSLO(t *testing.T) {
 	_, err := buildRecommendations(
 		samples,
 		kubernetes.ResourceSettings{},
-		20,
-		3,
+		recommender.DefaultPolicy(),
 		nil,
 		loadResult,
 		loadtest.SLO{
@@ -87,7 +86,8 @@ func TestValidateConfigAcceptsSupportedBoundaries(t *testing.T) {
 			update: func(cfg *Config) {
 				cfg.Duration = time.Nanosecond
 				cfg.RPS = 1
-				cfg.Margin = minimumMargin
+				cfg.CPURequestBufferPercent = 0
+				cfg.MemoryBufferPercent = 0
 			},
 		},
 		{
@@ -97,7 +97,8 @@ func TestValidateConfigAcceptsSupportedBoundaries(t *testing.T) {
 				cfg.Duration = maximumLoadTestDuration
 				cfg.RPS = 0
 				cfg.Concurrency = maximumConcurrency
-				cfg.Margin = maximumMargin
+				cfg.CPURequestBufferPercent = 1000
+				cfg.MemoryBufferPercent = 1000
 			},
 		},
 		{
@@ -177,14 +178,24 @@ func TestValidateConfigRejectsInvalidInput(t *testing.T) {
 			wantErr: "--duration must not exceed 24h0m0s",
 		},
 		{
-			name:    "margin below minimum",
-			update:  func(cfg *Config) { cfg.Margin = minimumMargin - 1 },
-			wantErr: "--margin must be between 0 and 100",
+			name:    "invalid CPU percentile",
+			update:  func(cfg *Config) { cfg.CPUPercentile = 0 },
+			wantErr: "CPU percentile must be greater than 0",
 		},
 		{
-			name:    "margin above maximum",
-			update:  func(cfg *Config) { cfg.Margin = maximumMargin + 1 },
-			wantErr: "--margin must be between 0 and 100",
+			name:    "negative memory buffer",
+			update:  func(cfg *Config) { cfg.MemoryBufferPercent = -1 },
+			wantErr: "memory buffer percent",
+		},
+		{
+			name:    "unknown CPU limit policy",
+			update:  func(cfg *Config) { cfg.CPULimitMode = "dynamic" },
+			wantErr: "unsupported CPU limit policy",
+		},
+		{
+			name:    "invalid memory limit multiplier",
+			update:  func(cfg *Config) { cfg.MemoryLimitMultiplier = 0.9 },
+			wantErr: "memory limit multiplier must be at least 1",
 		},
 		{
 			name: "no positive load",
@@ -193,6 +204,13 @@ func TestValidateConfigRejectsInvalidInput(t *testing.T) {
 				cfg.Concurrency = 0
 			},
 			wantErr: "either --rps or --concurrency must be greater than zero",
+		},
+		{
+			name: "ambiguous load mode",
+			update: func(cfg *Config) {
+				cfg.Concurrency = 1
+			},
+			wantErr: "--rps and --concurrency are mutually exclusive",
 		},
 		{
 			name: "negative RPS",
@@ -269,17 +287,23 @@ func TestValidateConfigRejectsInvalidInput(t *testing.T) {
 
 func validConfig() Config {
 	return Config{
-		Target:               "http://localhost:8080",
-		DeploymentName:       "api",
-		ContainerName:        "server",
-		Namespace:            "default",
-		Duration:             time.Minute,
-		RPS:                  50,
-		MaximumHTTPErrorRate: defaultMaximumErrorPercent,
-		MaximumP95Latency:    defaultMaximumP95Latency,
-		Margin:               20,
-		MinimumSamples:       3,
-		OutputFormat:         "text",
+		Target:                  "http://localhost:8080",
+		DeploymentName:          "api",
+		ContainerName:           "server",
+		Namespace:               "default",
+		Duration:                time.Minute,
+		RPS:                     50,
+		MaximumHTTPErrorRate:    defaultMaximumErrorPercent,
+		MaximumP95Latency:       defaultMaximumP95Latency,
+		CPUPercentile:           recommender.DefaultCPUPercentile,
+		CPURequestBufferPercent: recommender.DefaultCPURequestBufferPercent,
+		MemoryBufferPercent:     recommender.DefaultMemoryBufferPercent,
+		CPULimitMode:            recommender.LimitNone,
+		CPULimitMultiplier:      1,
+		MemoryLimitMode:         recommender.LimitRequestMultiplier,
+		MemoryLimitMultiplier:   recommender.DefaultMemoryLimitMultiplier,
+		MinimumSamples:          3,
+		OutputFormat:            "text",
 	}
 }
 

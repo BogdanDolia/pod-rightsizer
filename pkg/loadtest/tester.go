@@ -152,6 +152,12 @@ func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, er
 	if t.concurrency <= 0 && t.rps <= 0 {
 		return result, errors.New("load-test RPS must be greater than zero when concurrency is disabled")
 	}
+	if t.concurrency > 0 && t.rps > 0 {
+		return result, errors.New("load-test RPS and concurrency modes are mutually exclusive")
+	}
+	if t.rps < 0 {
+		return result, errors.New("load-test RPS must not be negative")
+	}
 	if t.concurrency < 0 {
 		return result, errors.New("load-test concurrency must not be negative")
 	}
@@ -193,7 +199,8 @@ func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, er
 	for requestResult := range requestResults {
 		metrics.Add(&requestResult)
 		if metrics.Requests > 0 && metrics.Requests%100 == 0 {
-			fmt.Printf(
+			fmt.Fprintf(
+				os.Stderr,
 				"Progress: %d requests, %.2f%% success\n",
 				metrics.Requests,
 				metrics.SuccessRate(),
@@ -226,7 +233,7 @@ func (t *Tester) runRPSTest(
 	results chan<- RequestResult,
 	reporter *panicReporter,
 ) TerminationReason {
-	fmt.Printf("Starting load test with %d RPS...\n", t.rps)
+	fmt.Fprintf(os.Stderr, "Starting load test with %d RPS...\n", t.rps)
 
 	interval := time.Second / time.Duration(t.rps)
 	if interval <= 0 {
@@ -261,7 +268,8 @@ func (t *Tester) runConcurrentTest(
 	results chan<- RequestResult,
 	reporter *panicReporter,
 ) TerminationReason {
-	fmt.Printf(
+	fmt.Fprintf(
+		os.Stderr,
 		"Starting concurrent load test with %d workers...\n",
 		t.concurrency,
 	)
@@ -348,11 +356,11 @@ func logRequestError(err error) {
 	var netErr net.Error
 	switch {
 	case errors.As(err, &netErr) && netErr.Timeout():
-		fmt.Printf("Network timeout error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Network timeout error: %v\n", err)
 	case strings.Contains(err.Error(), "connection refused"):
-		fmt.Printf("Connection refused: %v (is the service running?)\n", err)
+		fmt.Fprintf(os.Stderr, "Connection refused: %v (is the service running?)\n", err)
 	default:
-		fmt.Printf("HTTP request error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "HTTP request error: %v\n", err)
 	}
 }
 
@@ -372,7 +380,7 @@ func (t *Tester) validateTarget() (*url.URL, error) {
 	target := t.target
 	if !isURL(target) {
 		target = "http://" + target
-		fmt.Printf("Added http:// prefix, target is now: %s\n", target)
+		fmt.Fprintf(os.Stderr, "Added http:// prefix, target is now: %s\n", target)
 	}
 
 	parsedURL, err := url.Parse(target)
@@ -386,7 +394,7 @@ func (t *Tester) validateTarget() (*url.URL, error) {
 		return nil, errors.New("target URL must include a host")
 	}
 
-	fmt.Printf("Validated target URL: %s\n", parsedURL.String())
+	fmt.Fprintf(os.Stderr, "Validated target URL: %s\n", parsedURL.String())
 	return parsedURL, nil
 }
 
@@ -582,30 +590,31 @@ func (r RunResult) EvaluateSLO(slo SLO) (SLOAssessment, error) {
 	return assessment, nil
 }
 
-// PrintSummary prints the typed load-test result to stdout.
+// PrintSummary prints the typed load-test result to stderr so structured CLI
+// output on stdout remains machine-readable.
 func (r RunResult) PrintSummary() {
-	fmt.Fprintln(os.Stdout, "\nLoad Test Results")
-	fmt.Fprintln(os.Stdout, "-----------------")
-	fmt.Fprintf(os.Stdout, "Termination Reason: %s\n", r.TerminationReason)
-	fmt.Fprintf(os.Stdout, "Test Duration: %s\n", r.Duration.Round(time.Millisecond))
-	fmt.Fprintf(os.Stdout, "Total Requests: %d\n", r.Requests)
-	fmt.Fprintf(os.Stdout, "Actual RPS: %.2f req/s\n", r.ActualRPS)
-	fmt.Fprintf(os.Stdout, "HTTP Error Rate: %.2f%%\n", r.HTTPErrorRate*100)
-	fmt.Fprintf(os.Stdout, "Latency p50: %s\n", r.P50Latency)
-	fmt.Fprintf(os.Stdout, "Latency p95: %s\n", r.P95Latency)
-	fmt.Fprintf(os.Stdout, "Latency p99: %s\n", r.P99Latency)
+	fmt.Fprintln(os.Stderr, "\nLoad Test Results")
+	fmt.Fprintln(os.Stderr, "-----------------")
+	fmt.Fprintf(os.Stderr, "Termination Reason: %s\n", r.TerminationReason)
+	fmt.Fprintf(os.Stderr, "Test Duration: %s\n", r.Duration.Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "Total Requests: %d\n", r.Requests)
+	fmt.Fprintf(os.Stderr, "Actual RPS: %.2f req/s\n", r.ActualRPS)
+	fmt.Fprintf(os.Stderr, "HTTP Error Rate: %.2f%%\n", r.HTTPErrorRate*100)
+	fmt.Fprintf(os.Stderr, "Latency p50: %s\n", r.P50Latency)
+	fmt.Fprintf(os.Stderr, "Latency p95: %s\n", r.P95Latency)
+	fmt.Fprintf(os.Stderr, "Latency p99: %s\n", r.P99Latency)
 
-	fmt.Fprintln(os.Stdout, "\nStatus Code Distribution:")
+	fmt.Fprintln(os.Stderr, "\nStatus Code Distribution:")
 	codes := make([]int, 0, len(r.StatusCodes))
 	for code := range r.StatusCodes {
 		codes = append(codes, code)
 	}
 	sort.Ints(codes)
 	if len(codes) == 0 {
-		fmt.Fprintln(os.Stdout, "No HTTP responses recorded")
+		fmt.Fprintln(os.Stderr, "No HTTP responses recorded")
 		return
 	}
 	for _, code := range codes {
-		fmt.Fprintf(os.Stdout, "[%d]: %d responses\n", code, r.StatusCodes[code])
+		fmt.Fprintf(os.Stderr, "[%d]: %d responses\n", code, r.StatusCodes[code])
 	}
 }

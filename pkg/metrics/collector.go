@@ -3,8 +3,6 @@ package metrics
 import (
 	"context"
 	"time"
-
-	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
 )
 
 // ResourceMetrics represents a point-in-time metrics collection
@@ -14,15 +12,19 @@ type ResourceMetrics struct {
 	MemoryUsage float64 // in Mi
 }
 
+type podMetricsClient interface {
+	GetPodMetrics(ctx context.Context, namespace, target string) (float64, float64, error)
+}
+
 // Collector is responsible for collecting Kubernetes pod metrics
 type Collector struct {
-	k8sClient *kubernetes.Client
+	k8sClient podMetricsClient
 	namespace string
 	target    string
 }
 
 // NewCollector creates a new metrics collector
-func NewCollector(k8sClient *kubernetes.Client, namespace, target string) *Collector {
+func NewCollector(k8sClient podMetricsClient, namespace, target string) *Collector {
 	return &Collector{
 		k8sClient: k8sClient,
 		namespace: namespace,

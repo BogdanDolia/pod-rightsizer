@@ -15,430 +15,278 @@ import (
 	"time"
 )
 
-// Tester is responsible for running load tests
+const (
+	resultsBufferSize  = 10_000
+	httpRequestTimeout = 30 * time.Second
+)
+
+// Tester is responsible for running load tests.
 type Tester struct {
 	target      string
 	rps         int
 	concurrency int
 	client      *http.Client
-	results     chan *Result
 }
 
-// Result represents the result of a single request
+// Result represents the result of a single request.
 type Result struct {
 	Latency    time.Duration
 	StatusCode int
 	Error      error
 }
 
-// NewTester creates a new load tester
+// NewTester creates a new load tester.
 func NewTester(target string, rps, concurrency int) *Tester {
 	return &Tester{
 		target:      target,
 		rps:         rps,
 		concurrency: concurrency,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: httpRequestTimeout,
 		},
-		results: make(chan *Result, 10000), // Buffer for results
 	}
 }
 
-// Run executes a load test for the specified duration
+type panicReporter struct {
+	once   sync.Once
+	errCh  chan error
+	cancel context.CancelFunc
+}
+
+func newPanicReporter(cancel context.CancelFunc) *panicReporter {
+	return &panicReporter{
+		errCh:  make(chan error, 1),
+		cancel: cancel,
+	}
+}
+
+func (r *panicReporter) recover(component string) {
+	if value := recover(); value != nil {
+		r.once.Do(func() {
+			r.errCh <- fmt.Errorf("panic in %s: %v", component, value)
+			r.cancel()
+		})
+	}
+}
+
+func (r *panicReporter) err() error {
+	select {
+	case err := <-r.errCh:
+		return err
+	default:
+		return nil
+	}
+}
+
+// Run executes a load test for the specified duration. It does not return
+// until every producer and request goroutine has stopped.
 func (t *Tester) Run(ctx context.Context, duration time.Duration) error {
-	// Check if we should use RPS or Concurrency mode
-	if t.concurrency > 0 {
-		return t.runConcurrentTest(ctx, duration)
+	if ctx == nil {
+		return errors.New("load-test context must not be nil")
 	}
-	return t.runRPSTest(ctx, duration)
-}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if duration <= 0 {
+		return errors.New("load-test duration must be greater than zero")
+	}
+	if t.client == nil {
+		return errors.New("load-test HTTP client must not be nil")
+	}
+	if t.concurrency < 0 {
+		return errors.New("load-test concurrency must not be negative")
+	}
+	if t.concurrency == 0 && t.rps <= 0 {
+		return errors.New("load-test RPS must be greater than zero when concurrency is disabled")
+	}
 
-// runRPSTest runs a load test at a specified RPS
-func (t *Tester) runRPSTest(ctx context.Context, duration time.Duration) error {
-	// Make sure the target URL is valid
 	targetURL, err := t.validateTarget()
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Starting load test with %d RPS for %s...\n", t.rps, duration)
+	runCtx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 
-	// Create contexts for the test
-	testCtx, testCancel := context.WithTimeout(ctx, duration)
-	defer testCancel()
+	reporter := newPanicReporter(cancel)
+	results := make(chan *Result, resultsBufferSize)
+	producerDone := make(chan struct{})
+	startedAt := time.Now()
 
-	// Start collecting results
-	resultsChan := make(chan *Result, t.rps*int(duration.Seconds()))
-	resultsDone := make(chan struct{})
-
-	// Use a waitgroup to track all goroutines
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	// Record the start time of the test
-	testStartTime := time.Now()
-
-	// Collect and process results
 	go func() {
-		defer wg.Done()
-		defer close(resultsDone)
+		defer close(producerDone)
+		defer close(results)
+		defer reporter.recover("load-test producer")
 
-		var metrics Metrics
-		// Initialize metrics with the test start time
-		metrics.StartTime = testStartTime
-		metrics.TestDuration = duration // Store the intended duration
-
-		for {
-			select {
-			case <-testCtx.Done():
-				// Record end time when context is done
-				metrics.EndTime = time.Now()
-				return
-			case result, ok := <-resultsChan:
-				if !ok {
-					// Record end time and print final metrics
-					metrics.EndTime = time.Now()
-					// Calculate actual test duration
-					metrics.TestDuration = metrics.EndTime.Sub(metrics.StartTime)
-					fmt.Printf("Test took %s (expected %s)\n", metrics.TestDuration.Round(time.Millisecond), duration)
-					metrics.PrintSummary()
-					return
-				}
-
-				metrics.Add(result)
-
-				// Log progress periodically
-				if metrics.Requests%100 == 0 {
-					fmt.Printf("Progress: %d requests, %.2f%% success\n",
-						metrics.Requests, metrics.SuccessRate())
-				}
-			}
+		if t.concurrency > 0 {
+			t.runConcurrentTest(runCtx, targetURL, results, reporter)
+			return
 		}
+		t.runRPSTest(runCtx, targetURL, results, reporter)
 	}()
 
-	// Start the load test
+	metrics := Metrics{StartTime: startedAt}
+	for result := range results {
+		metrics.Add(result)
+		if metrics.Requests > 0 && metrics.Requests%100 == 0 {
+			fmt.Printf(
+				"Progress: %d requests, %.2f%% success\n",
+				metrics.Requests,
+				metrics.SuccessRate(),
+			)
+		}
+	}
+	<-producerDone
+
+	metrics.EndTime = time.Now()
+	metrics.TestDuration = metrics.EndTime.Sub(metrics.StartTime)
+	fmt.Printf("Test took %s (expected %s)\n", metrics.TestDuration.Round(time.Millisecond), duration)
+	metrics.PrintSummary()
+
+	if err := reporter.err(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// runRPSTest schedules requests at the configured rate until ctx is done.
+func (t *Tester) runRPSTest(
+	ctx context.Context,
+	targetURL *url.URL,
+	results chan<- *Result,
+	reporter *panicReporter,
+) {
+	fmt.Printf("Starting load test with %d RPS...\n", t.rps)
+
 	interval := time.Second / time.Duration(t.rps)
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Use a mutex to protect access to a "closed" flag
-	var resultChanMutex sync.Mutex
-	resultChanClosed := false
-
-	// Safe send function to avoid sending on closed channel
-	safeSend := func(result *Result) {
-		resultChanMutex.Lock()
-		defer resultChanMutex.Unlock()
-
-		// Only send if channel is not closed
-		if !resultChanClosed {
-			select {
-			case <-testCtx.Done():
-				// Context canceled, don't send
-			case resultsChan <- result:
-				// Successfully sent
-			default:
-				// Channel buffer full, log and continue
-				fmt.Println("Warning: result channel buffer full")
-			}
+	var requests sync.WaitGroup
+	for {
+		select {
+		case <-ctx.Done():
+			requests.Wait()
+			return
+		case <-ticker.C:
+			requests.Add(1)
+			go func() {
+				defer requests.Done()
+				defer reporter.recover("HTTP request")
+				sendResult(ctx, results, t.doRequest(ctx, targetURL))
+			}()
 		}
 	}
-
-	// Safely close the channel
-	safeClose := func() {
-		resultChanMutex.Lock()
-		defer resultChanMutex.Unlock()
-
-		if !resultChanClosed {
-			resultChanClosed = true
-			close(resultsChan)
-		}
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer safeClose() // Use safe close instead of direct close
-
-		var requestWg sync.WaitGroup
-		sent := 0
-
-		for {
-			select {
-			case <-testCtx.Done():
-				// Wait for all request goroutines to complete before exiting
-				requestWg.Wait()
-				return
-			case <-ticker.C:
-				requestWg.Add(1)
-				go func() {
-					defer requestWg.Done()
-
-					start := time.Now()
-					// Create request with special user agent
-					req, err := http.NewRequestWithContext(testCtx, "GET", targetURL.String(), nil)
-					if err != nil {
-						fmt.Printf("Error creating request to %s: %v\n", targetURL.String(), err)
-						safeSend(&Result{Error: err})
-						return
-					}
-
-					// Add custom headers to help identify our requests
-					req.Header.Add("User-Agent", "Pod-Rightsizer/1.0")
-
-					// Make the request
-					resp, err := t.client.Do(req)
-					latency := time.Since(start)
-
-					if err != nil {
-						// Extract more details about the error
-						var netErr net.Error
-						if errors.As(err, &netErr) && netErr.Timeout() {
-							fmt.Printf("Network timeout error: %v\n", err)
-						} else if strings.Contains(err.Error(), "connection refused") {
-							fmt.Printf("Connection refused: %v (is the service running?)\n", err)
-						} else {
-							fmt.Printf("HTTP request error: %v\n", err)
-						}
-
-						safeSend(&Result{Latency: latency, Error: err})
-						return
-					}
-
-					// Discard and close body
-					io.Copy(io.Discard, resp.Body)
-					resp.Body.Close()
-
-					safeSend(&Result{
-						Latency:    latency,
-						StatusCode: resp.StatusCode,
-					})
-				}()
-
-				sent++
-				if sent >= t.rps*int(duration.Seconds()) {
-					// Wait for all request goroutines to complete before exiting
-					go func() {
-						requestWg.Wait()
-						testCancel() // Signal completion
-					}()
-					return
-				}
-			}
-		}
-	}()
-
-	// Wait for test completion
-	select {
-	case <-ctx.Done():
-		testCancel()
-		fmt.Println("Load test was canceled")
-	case <-testCtx.Done():
-		// Test completed normally
-	}
-
-	// Wait for result collection to finish
-	<-resultsDone
-
-	// Wait for all goroutines to complete
-	wg.Wait()
-
-	return nil
 }
 
-// runConcurrentTest runs a test with a fixed number of concurrent workers
-func (t *Tester) runConcurrentTest(ctx context.Context, duration time.Duration) error {
-	// Make sure the target URL is valid
-	targetURL, err := t.validateTarget()
-	if err != nil {
-		return err
-	}
+// runConcurrentTest keeps a fixed number of workers active until ctx is done.
+func (t *Tester) runConcurrentTest(
+	ctx context.Context,
+	targetURL *url.URL,
+	results chan<- *Result,
+	reporter *panicReporter,
+) {
+	fmt.Printf("Starting concurrent load test with %d workers...\n", t.concurrency)
 
-	fmt.Printf("Starting concurrent load test with %d workers for %s...\n",
-		t.concurrency, duration)
-
-	// Create contexts for the test
-	testCtx, testCancel := context.WithTimeout(ctx, duration)
-	defer testCancel()
-
-	// Start collecting results
-	resultsChan := make(chan *Result, 10000)
-	resultsDone := make(chan struct{})
-
-	// Use a waitgroup to track all goroutines
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	// Record the start time of the test
-	testStartTime := time.Now()
-
-	// Collect and process results
-	go func() {
-		defer wg.Done()
-		defer close(resultsDone)
-
-		var metrics Metrics
-		// Initialize metrics with the test start time
-		metrics.StartTime = testStartTime
-		metrics.TestDuration = duration // Store the intended duration
-
-		for {
-			select {
-			case <-testCtx.Done():
-				// Record end time when context is done
-				metrics.EndTime = time.Now()
-				return
-			case result, ok := <-resultsChan:
-				if !ok {
-					// Record end time and print final metrics
-					metrics.EndTime = time.Now()
-					// Calculate actual test duration
-					metrics.TestDuration = metrics.EndTime.Sub(metrics.StartTime)
-					fmt.Printf("Test took %s (expected %s)\n", metrics.TestDuration.Round(time.Millisecond), duration)
-					metrics.PrintSummary()
-					return
-				}
-
-				metrics.Add(result)
-
-				// Log progress periodically
-				if metrics.Requests%100 == 0 {
-					fmt.Printf("Progress: %d requests, %.2f%% success\n",
-						metrics.Requests, metrics.SuccessRate())
-				}
-			}
-		}
-	}()
-
-	// Use a mutex to protect access to a "closed" flag for the results channel
-	var resultChanMutex sync.Mutex
-	resultChanClosed := false
-
-	// Safe send function to avoid sending on closed channel
-	safeSend := func(result *Result) {
-		resultChanMutex.Lock()
-		defer resultChanMutex.Unlock()
-
-		// Only send if channel is not closed
-		if !resultChanClosed {
-			select {
-			case <-testCtx.Done():
-				// Context canceled, don't send
-			case resultsChan <- result:
-				// Successfully sent
-			default:
-				// Channel buffer full, log and continue
-				fmt.Println("Warning: result channel buffer full")
-			}
-		}
-	}
-
-	// Safely close the channel
-	safeClose := func() {
-		resultChanMutex.Lock()
-		defer resultChanMutex.Unlock()
-
-		if !resultChanClosed {
-			resultChanClosed = true
-			close(resultsChan)
-		}
-	}
-
-	// Start worker goroutines
-	var workerWg sync.WaitGroup
+	var workers sync.WaitGroup
 	for i := 0; i < t.concurrency; i++ {
-		workerWg.Add(1)
-		go func(id int) {
-			defer workerWg.Done()
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			defer reporter.recover("HTTP worker")
 
 			for {
-				select {
-				case <-testCtx.Done():
+				if ctx.Err() != nil {
 					return
-				default:
-					start := time.Now()
-					// Create request with special user agent
-					req, err := http.NewRequestWithContext(testCtx, "GET", targetURL.String(), nil)
-					if err != nil {
-						fmt.Printf("Error creating request to %s: %v\n", targetURL.String(), err)
-						safeSend(&Result{Error: err})
-						time.Sleep(100 * time.Millisecond) // Back off on errors
-						continue
-					}
+				}
 
-					// Add custom headers to help identify our requests
-					req.Header.Add("User-Agent", "Pod-Rightsizer/1.0")
+				result := t.doRequest(ctx, targetURL)
+				if !sendResult(ctx, results, result) {
+					return
+				}
 
-					// Make the request
-					resp, err := t.client.Do(req)
-					latency := time.Since(start)
-
-					if err != nil {
-						// Extract more details about the error
-						var netErr net.Error
-						if errors.As(err, &netErr) && netErr.Timeout() {
-							fmt.Printf("Network timeout error: %v\n", err)
-						} else if strings.Contains(err.Error(), "connection refused") {
-							fmt.Printf("Connection refused: %v (is the service running?)\n", err)
-						} else {
-							fmt.Printf("HTTP request error: %v\n", err)
-						}
-
-						safeSend(&Result{Latency: latency, Error: err})
-						time.Sleep(100 * time.Millisecond) // Back off on errors
-						continue
-					}
-
-					// Discard and close body
-					io.Copy(io.Discard, resp.Body)
-					resp.Body.Close()
-
-					safeSend(&Result{
-						Latency:    latency,
-						StatusCode: resp.StatusCode,
-					})
-
-					// Small delay to prevent excessive CPU usage
-					select {
-					case <-testCtx.Done():
-						return
-					case <-time.After(10 * time.Millisecond):
-						// Continue after delay
-					}
+				delay := 10 * time.Millisecond
+				if result.Error != nil {
+					delay = 100 * time.Millisecond
+				}
+				if !waitFor(ctx, delay) {
+					return
 				}
 			}
-		}(i)
+		}()
 	}
 
-	// Wait for test completion
-	select {
-	case <-ctx.Done():
-		testCancel()
-		fmt.Println("Concurrent test was canceled")
-	case <-testCtx.Done():
-		// Test completed normally
-	}
-
-	// Start a goroutine to wait for all workers to finish before closing the channel
-	go func() {
-		workerWg.Wait()
-		safeClose() // Safely close the channel when all workers are done
-	}()
-
-	// Wait for metrics collection to finish
-	<-resultsDone
-
-	// Wait for all goroutines to complete
-	wg.Wait()
-
-	return nil
+	workers.Wait()
 }
 
-// validateTarget ensures the target is a valid URL and normalizes it
+func (t *Tester) doRequest(ctx context.Context, targetURL *url.URL) *Result {
+	startedAt := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL.String(), nil)
+	if err != nil {
+		return &Result{Latency: time.Since(startedAt), Error: err}
+	}
+	req.Header.Set("User-Agent", "Pod-Rightsizer/1.0")
+
+	resp, err := t.client.Do(req)
+	latency := time.Since(startedAt)
+	if err != nil {
+		logRequestError(err)
+		return &Result{Latency: latency, Error: err}
+	}
+	defer resp.Body.Close()
+
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return &Result{
+			Latency:    latency,
+			StatusCode: resp.StatusCode,
+			Error:      fmt.Errorf("read response body: %w", err),
+		}
+	}
+
+	return &Result{Latency: latency, StatusCode: resp.StatusCode}
+}
+
+func sendResult(ctx context.Context, results chan<- *Result, result *Result) bool {
+	select {
+	case results <- result:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func waitFor(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func logRequestError(err error) {
+	var netErr net.Error
+	switch {
+	case errors.As(err, &netErr) && netErr.Timeout():
+		fmt.Printf("Network timeout error: %v\n", err)
+	case strings.Contains(err.Error(), "connection refused"):
+		fmt.Printf("Connection refused: %v (is the service running?)\n", err)
+	default:
+		fmt.Printf("HTTP request error: %v\n", err)
+	}
+}
+
+// validateTarget ensures the target is a usable HTTP URL and normalizes it.
 func (t *Tester) validateTarget() (*url.URL, error) {
 	target := t.target
-
-	// Make sure target has a valid URL scheme
 	if !isURL(target) {
 		target = "http://" + target
 		fmt.Printf("Added http:// prefix, target is now: %s\n", target)
@@ -446,22 +294,21 @@ func (t *Tester) validateTarget() (*url.URL, error) {
 
 	parsedURL, err := url.Parse(target)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse target URL: %w", err)
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return nil, errors.New("target URL must use http or https")
+	}
+	if parsedURL.Host == "" {
+		return nil, errors.New("target URL must include a host")
 	}
 
 	fmt.Printf("Validated target URL: %s\n", parsedURL.String())
 	return parsedURL, nil
 }
 
-// isURL checks if a string looks like a URL with a scheme
-func isURL(s string) bool {
-	// Check for http:// prefix
-	hasHTTP := len(s) >= 7 && s[0:7] == "http://"
-
-	// Check for https:// prefix
-	hasHTTPS := len(s) >= 8 && s[0:8] == "https://"
-
-	return hasHTTP || hasHTTPS
+func isURL(value string) bool {
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 // Metrics holds load test metrics

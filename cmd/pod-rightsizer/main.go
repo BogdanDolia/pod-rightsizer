@@ -34,18 +34,13 @@ func main() {
 	// Parse command line arguments
 	cfg := parseFlags()
 
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
+	// Set up signal-aware cancellation without leaving a signal goroutine behind.
+	ctx, cancel := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
 	defer cancel()
-
-	// Set up signal handling for clean shutdown
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-signalChan
-		fmt.Println("\nReceived termination signal. Stopping gracefully...")
-		cancel()
-	}()
 
 	// Initialize Kubernetes client
 	k8sClient, err := kubernetes.NewClient(cfg.KubeconfigPath)
@@ -91,7 +86,11 @@ func main() {
 					fmt.Fprintf(os.Stderr, "Error collecting metrics: %v\n", err)
 					continue
 				}
-				metricsChan <- m
+				select {
+				case metricsChan <- m:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
@@ -104,7 +103,11 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		resultChan <- loadTester.Run(ctx, cfg.Duration)
+		result := loadTester.Run(ctx, cfg.Duration)
+		select {
+		case resultChan <- result:
+		case <-ctx.Done():
+		}
 	}()
 
 	// Collect all metrics during the test
@@ -134,9 +137,16 @@ func main() {
 		}
 
 		// Allow final metrics to be collected
+		finalMetricsTimer := time.NewTimer(5 * time.Second)
 		select {
-		case <-time.After(5 * time.Second):
+		case <-finalMetricsTimer.C:
 		case <-ctx.Done():
+		}
+		if !finalMetricsTimer.Stop() {
+			select {
+			case <-finalMetricsTimer.C:
+			default:
+			}
 		}
 
 		cancel() // Stop metrics collection

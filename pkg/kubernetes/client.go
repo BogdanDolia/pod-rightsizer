@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -13,6 +14,8 @@ import (
 	"k8s.io/client-go/util/homedir"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 )
+
+const defaultRequestTimeout = 30 * time.Second
 
 // ResourceSettings represents the resource requests and limits
 type ResourceSettings struct {
@@ -52,6 +55,11 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error building kubeconfig: %v", err)
 		}
+	}
+
+	config = rest.CopyConfig(config)
+	if config.Timeout <= 0 {
+		config.Timeout = defaultRequestTimeout
 	}
 
 	// Create clientset

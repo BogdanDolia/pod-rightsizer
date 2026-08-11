@@ -1,9 +1,15 @@
 package recommender
 
 import (
+	"fmt"
+
 	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
 )
+
+// DefaultMinimumSamples is the minimum number of non-overlapping Metrics API
+// source windows required before a recommendation is considered safe.
+const DefaultMinimumSamples = 3
 
 // Recommendations holds the recommended resource settings
 type Recommendations struct {
@@ -18,10 +24,27 @@ func GenerateRecommendations(
 	allMetrics []metrics.ResourceMetrics,
 	currentSettings kubernetes.ResourceSettings,
 	margin int,
-) Recommendations {
+	minimumSamples int,
+) (Recommendations, error) {
+	if minimumSamples <= 0 {
+		return Recommendations{}, fmt.Errorf("minimum samples must be greater than zero")
+	}
+
+	independent, err := metrics.IndependentSamples(allMetrics)
+	if err != nil {
+		return Recommendations{}, err
+	}
+	if len(independent) < minimumSamples {
+		return Recommendations{}, fmt.Errorf(
+			"not enough independent metrics samples: got %d, need at least %d",
+			len(independent),
+			minimumSamples,
+		)
+	}
+
 	// Calculate average and peak metrics
-	avgCPU, avgMemory := metrics.CalculateAverageMetrics(allMetrics)
-	peakCPU, peakMemory := metrics.CalculatePeakMetrics(allMetrics)
+	avgCPU, avgMemory := metrics.CalculateAverageMetrics(independent)
+	peakCPU, peakMemory := metrics.CalculatePeakMetrics(independent)
 
 	// Apply safety margin
 	marginMultiplier := 1.0 + (float64(margin) / 100.0)
@@ -44,7 +67,7 @@ func GenerateRecommendations(
 	// Apply some reasonable minimum values
 	recommendations = applyMinimumValues(recommendations)
 
-	return recommendations
+	return recommendations, nil
 }
 
 // applyMinimumValues ensures we don't recommend values that are too small

@@ -1,6 +1,7 @@
 package recommender
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -9,22 +10,29 @@ import (
 )
 
 func TestGenerateRecommendations(t *testing.T) {
+	baseTime := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
 	// Setup test metrics data
 	testMetrics := []metrics.ResourceMetrics{
 		{
-			Timestamp:   time.Now(),
-			CPUUsage:    0.1, // 100m
-			MemoryUsage: 100, // 100Mi
+			ContainerName: "worker",
+			Timestamp:     baseTime,
+			Window:        15 * time.Second,
+			CPUUsage:      0.1, // 100m
+			MemoryUsage:   100, // 100Mi
 		},
 		{
-			Timestamp:   time.Now(),
-			CPUUsage:    0.15, // 150m
-			MemoryUsage: 120,  // 120Mi
+			ContainerName: "worker",
+			Timestamp:     baseTime.Add(15 * time.Second),
+			Window:        15 * time.Second,
+			CPUUsage:      0.15, // 150m
+			MemoryUsage:   120,  // 120Mi
 		},
 		{
-			Timestamp:   time.Now(),
-			CPUUsage:    0.2, // 200m
-			MemoryUsage: 150, // 150Mi
+			ContainerName: "worker",
+			Timestamp:     baseTime.Add(30 * time.Second),
+			Window:        15 * time.Second,
+			CPUUsage:      0.2, // 200m
+			MemoryUsage:   150, // 150Mi
 		},
 	}
 
@@ -38,7 +46,10 @@ func TestGenerateRecommendations(t *testing.T) {
 
 	// Test with 20% margin
 	margin := 20
-	recommendations := GenerateRecommendations(testMetrics, currentSettings, margin)
+	recommendations, err := GenerateRecommendations(testMetrics, currentSettings, margin, 3)
+	if err != nil {
+		t.Fatalf("GenerateRecommendations() error = %v", err)
+	}
 
 	// Expected results (with 20% margin):
 	// Avg CPU: (0.1 + 0.15 + 0.2) / 3 = 0.15, with 20% margin = 0.18
@@ -67,15 +78,20 @@ func TestGenerateRecommendations(t *testing.T) {
 	}
 
 	// Test minimum values
-	emptyMetrics := []metrics.ResourceMetrics{
+	smallMetrics := []metrics.ResourceMetrics{
 		{
-			Timestamp:   time.Now(),
-			CPUUsage:    0.001, // 1m (very small)
-			MemoryUsage: 10,    // 10Mi (very small)
+			ContainerName: "worker",
+			Timestamp:     baseTime,
+			Window:        15 * time.Second,
+			CPUUsage:      0.001, // 1m (very small)
+			MemoryUsage:   10,    // 10Mi (very small)
 		},
 	}
 
-	minRecommendations := GenerateRecommendations(emptyMetrics, currentSettings, margin)
+	minRecommendations, err := GenerateRecommendations(smallMetrics, currentSettings, margin, 1)
+	if err != nil {
+		t.Fatalf("GenerateRecommendations() minimum values error = %v", err)
+	}
 
 	// Should use minimum values, not the actual calculated ones
 	if minRecommendations.CPURequest < 0.01 {
@@ -92,6 +108,77 @@ func TestGenerateRecommendations(t *testing.T) {
 
 	if minRecommendations.MemoryLimit < 64 {
 		t.Errorf("Min Memory Limit not enforced: got %.1f, want at least 64", minRecommendations.MemoryLimit)
+	}
+}
+
+func TestGenerateRecommendationsRequiresIndependentSamples(t *testing.T) {
+	timestamp := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
+	duplicate := metrics.ResourceMetrics{
+		ContainerName: "worker",
+		Timestamp:     timestamp,
+		Window:        15 * time.Second,
+		CPUUsage:      0.1,
+		MemoryUsage:   100,
+	}
+
+	_, err := GenerateRecommendations(
+		[]metrics.ResourceMetrics{duplicate, duplicate, duplicate},
+		kubernetes.ResourceSettings{},
+		20,
+		3,
+	)
+	if err == nil || !strings.Contains(err.Error(), "got 1, need at least 3") {
+		t.Fatalf("GenerateRecommendations() error = %v, want independent sample error", err)
+	}
+}
+
+func TestGenerateRecommendationsDoesNotCountOverlappingSourceWindows(t *testing.T) {
+	baseTime := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
+	samples := []metrics.ResourceMetrics{
+		{
+			ContainerName: "worker",
+			Timestamp:     baseTime,
+			Window:        30 * time.Second,
+			CPUUsage:      0.1,
+			MemoryUsage:   100,
+		},
+		{
+			ContainerName: "worker",
+			Timestamp:     baseTime.Add(15 * time.Second),
+			Window:        30 * time.Second,
+			CPUUsage:      0.2,
+			MemoryUsage:   200,
+		},
+	}
+
+	_, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, 20, 2)
+	if err == nil || !strings.Contains(err.Error(), "got 1, need at least 2") {
+		t.Fatalf("GenerateRecommendations() error = %v, want overlapping-window sample error", err)
+	}
+}
+
+func TestGenerateRecommendationsRejectsMixedContainers(t *testing.T) {
+	timestamp := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
+	samples := []metrics.ResourceMetrics{
+		{
+			ContainerName: "worker",
+			Timestamp:     timestamp,
+			Window:        15 * time.Second,
+			CPUUsage:      0.1,
+			MemoryUsage:   100,
+		},
+		{
+			ContainerName: "sidecar",
+			Timestamp:     timestamp.Add(15 * time.Second),
+			Window:        15 * time.Second,
+			CPUUsage:      0.9,
+			MemoryUsage:   500,
+		},
+	}
+
+	_, err := GenerateRecommendations(samples, kubernetes.ResourceSettings{}, 20, 2)
+	if err == nil || !strings.Contains(err.Error(), "calculate each container separately") {
+		t.Fatalf("GenerateRecommendations() error = %v, want mixed-container error", err)
 	}
 }
 

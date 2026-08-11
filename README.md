@@ -4,9 +4,11 @@ A CLI tool to automatically determine optimal CPU and memory requests/limits for
 
 ## Features
 
-- **Load Testing**: Powerful HTTP load testing engine with RPS and concurrency modes
+- **Typed Load Testing**: Returns actual RPS, HTTP error rate, p50/p95/p99 latency, status-code distribution, and a termination reason
+- **SLO-Gated Recommendations**: Refuses to recommend or generate a patch when the target load, error-rate, or latency SLO is missed
 - **Kubernetes Integration**: Connects to your cluster in-cluster or via kubeconfig
-- **Metrics Collection**: Gathers CPU and memory metrics during load tests
+- **Fail-safe Metrics Collection**: Uses source timestamps/windows, ignores repeated polls, and aborts recommendations after collection errors
+- **Container Isolation**: Calculates usage and recommendations only for the explicitly selected container
 - **Intelligent Recommendations**: Analyzes usage patterns to suggest optimal resource settings
 - **Multiple Output Formats**: Supports text, JSON, and YAML output formats
 - **YAML Patch Generation**: Creates ready-to-apply Kubernetes YAML patches
@@ -30,7 +32,7 @@ go build -o pod-rightsizer
 
 ```bash
 # Basic usage with minimal parameters
-./pod-rightsizer --target http://localhost:8080 --service-name nginx --namespace default --duration 1m --rps 500
+./pod-rightsizer --target http://localhost:8080 --deployment nginx --container nginx --namespace default --duration 1m --rps 500
 ```
 
 ### Advanced Usage
@@ -39,11 +41,16 @@ go build -o pod-rightsizer
 # Using all options
 ./pod-rightsizer \
   --target http://localhost:8080 \
-  --service-name myservice \
+  --deployment myservice-api \
+  --container api \
   --namespace default \
   --duration 5m \
   --rps 50 \
+  --min-actual-rps 47.5 \
+  --max-http-error-rate 1 \
+  --max-p95-latency 1s \
   --margin 30 \
+  --min-samples 3 \
   --output-format yaml \
   --kubeconfig ~/.kube/config
 ```
@@ -51,12 +58,17 @@ go build -o pod-rightsizer
 ### Parameters
 
 - `--target`: Target service URL or identifier for load testing (required)
-- `--service-name`: Kubernetes service name for metrics collection (defaults to target if not specified)
-- `--namespace`: Kubernetes namespace (default: "default")
-- `--duration`: Duration of the load test (default: "5m")
-- `--rps`: Requests per second for load testing (default: 50)
-- `--concurrency`: Alternative to RPS, number of concurrent connections (default: 0)
-- `--margin`: Safety margin percentage to add to recommendations (default: 20)
+- `--deployment`: Kubernetes Deployment whose pods should be measured (required)
+- `--container`: Container within the Deployment to measure and right-size (required)
+- `--namespace`: Kubernetes namespace as a valid DNS label (default: "default")
+- `--duration`: Positive duration of the load test, up to 24 hours (default: "5m")
+- `--rps`: Requests per second for load testing, from 1 to 10,000 when used (default: 50)
+- `--concurrency`: Alternative load mode, from 1 to 1,000 workers when used (default: 0)
+- `--min-actual-rps`: Minimum measured RPS SLO; defaults to 95% of `--rps` in RPS mode and is disabled by default in concurrency mode
+- `--max-http-error-rate`: Maximum transport/HTTP error rate SLO as a percentage (default: 1); HTTP `2xx` and `3xx` responses are successful
+- `--max-p95-latency`: Maximum p95 request latency SLO (default: "1s")
+- `--margin`: Safety margin percentage from 0 to 100 (default: 20)
+- `--min-samples`: Minimum number of non-overlapping Metrics API source windows required for a recommendation (default: 3, minimum: 2)
 - `--output-format`: Output format: text, json, or yaml (default: "text")
 - `--kubeconfig`: Path to kubeconfig file for external cluster access
 
@@ -82,10 +94,11 @@ Test Kubernetes services from your local machine using port forwarding:
 # Step 1: Set up port forwarding to the service
 kubectl port-forward service/myservice 8080:80
 
-# Step 2: Run pod-rightsizer with separate target and service-name
+# Step 2: Run pod-rightsizer with an explicit Deployment and container
 ./pod-rightsizer \
   --target http://localhost:8080 \
-  --service-name myservice \
+  --deployment myservice-api \
+  --container api \
   --namespace default \
   --duration 2m \
   --rps 50
@@ -98,7 +111,8 @@ Test services in a remote cluster using kubeconfig:
 ```bash
 ./pod-rightsizer \
   --target http://service-ingress.example.com \
-  --service-name internal-service \
+  --deployment internal-service-api \
+  --container api \
   --namespace production \
   --kubeconfig ~/.kube/production-config
 ```
@@ -111,9 +125,21 @@ Test services in a remote cluster using kubeconfig:
 ===== Pod Rightsizer Results =====
 
 Load Test Target: http://localhost:8080
-Service Name: myservice
+Deployment: myservice-api
+Container: api
+Pod Selector: app.kubernetes.io/name=myservice,app.kubernetes.io/component=api
 Namespace: default
 Load test: 50 RPS for 5m0s
+
+Load Test Result:
+Actual RPS: 49.82 req/s
+HTTP Error Rate: 0.20%
+Latency p50/p95/p99: 42ms / 180ms / 310ms
+Termination Reason: duration_elapsed
+Status Codes:
+  200: 14910
+  503: 30
+SLO: minimum RPS 47.50, maximum HTTP error rate 1.00%, maximum p95 1s
 
 Current Settings:
 CPU Request: 100m
@@ -122,6 +148,8 @@ Memory Request: 128Mi
 Memory Limit: 256Mi
 
 Metrics Collected:
+Independent Samples: 18
+Source Resolution: 15s
 Peak CPU: 156m
 Average CPU: 87m
 Peak Memory: 145Mi
@@ -145,12 +173,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: default
-  name: myservice
+  name: myservice-api
 spec:
   template:
     spec:
       containers:
-      - name: app
+      - name: api
         resources:
           requests:
             cpu: "105m"
@@ -172,8 +200,12 @@ If you're having issues with connectivity or metrics collection:
 
 - Ensure your service is running and accessible from where pod-rightsizer is running
 - For local testing, verify port forwarding is working correctly
-- Check that the service has the appropriate Kubernetes labels for selection
+- Check that the Deployment selector matches its running pods
+- Check that `--container` exactly matches a container name in the Deployment pod template
 - Verify the metrics server is running in your cluster
+- Ensure the load-test duration is long enough to cover at least `--min-samples` non-overlapping source windows; repeated timestamps and overlapping rolling windows do not count as new evidence
+- Any load-test or Metrics API collection error invalidates the run, so no recommendation or resource patch is produced from partial data
+- A completed load test must also satisfy every configured SLO. Missing the minimum actual RPS, exceeding the HTTP error-rate limit, or exceeding the p95 latency limit suppresses the recommendation and patch
 - Increase verbosity by redirecting stderr to a file for detailed error messages
 
 ## Building and Pushing Docker Image
@@ -214,7 +246,7 @@ kubectl apply -f pod-rightsizer-job.yaml
 kubectl logs job/pod-rightsizer -f
 ```
 
-The job will analyze the specified service and output resource recommendations, which you can then apply to your deployment.
+The job will analyze the selected Deployment container and output resource recommendations, which you can then apply to that Deployment.
 
 ## License
 

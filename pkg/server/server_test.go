@@ -19,8 +19,14 @@ import (
 )
 
 type fakeKubernetesClient struct {
-	getResourceSettings func(context.Context) (corek8s.ResourceSettings, error)
-	getPodMetrics       func(context.Context) (corek8s.ContainerMetrics, error)
+	getResourceSettings  func(context.Context) (corek8s.ResourceSettings, error)
+	getPodMetrics        func(context.Context) (corek8s.ContainerMetrics, error)
+	prepareResourcePatch func(
+		context.Context,
+		string,
+		corek8s.Workload,
+		corek8s.ResourceSettings,
+	) (*corek8s.ResourcePatch, error)
 }
 
 type fakeLoadTester func(context.Context, time.Duration) (coreloadtest.RunResult, error)
@@ -57,6 +63,18 @@ func (client *fakeKubernetesClient) GetPodMetrics(
 	_ corek8s.Workload,
 ) (corek8s.ContainerMetrics, error) {
 	return client.getPodMetrics(ctx)
+}
+
+func (client *fakeKubernetesClient) PrepareResourcePatch(
+	ctx context.Context,
+	namespace string,
+	workload corek8s.Workload,
+	desired corek8s.ResourceSettings,
+) (*corek8s.ResourcePatch, error) {
+	if client.prepareResourcePatch != nil {
+		return client.prepareResourcePatch(ctx, namespace, workload, desired)
+	}
+	return corek8s.NewResourcePatch(namespace, workload, desired)
 }
 
 func TestRunStatusSnapshotsAreRaceFree(t *testing.T) {
@@ -112,6 +130,7 @@ func TestAnalysisPassesDeadlineContextsToKubernetes(t *testing.T) {
 
 	var resourceContextHasDeadline atomic.Bool
 	var metricsContextHasDeadline atomic.Bool
+	var patchContextHasDeadline atomic.Bool
 	var sampleNumber atomic.Int64
 	api.newKubernetesClient = func() (analysisKubernetesClient, error) {
 		return &fakeKubernetesClient{
@@ -130,6 +149,16 @@ func TestAnalysisPassesDeadlineContextsToKubernetes(t *testing.T) {
 					CPUUsage:      0.1,
 					MemoryUsage:   64,
 				}, nil
+			},
+			prepareResourcePatch: func(
+				ctx context.Context,
+				namespace string,
+				workload corek8s.Workload,
+				desired corek8s.ResourceSettings,
+			) (*corek8s.ResourcePatch, error) {
+				_, hasDeadline := ctx.Deadline()
+				patchContextHasDeadline.Store(hasDeadline)
+				return corek8s.NewResourcePatch(namespace, workload, desired)
 			},
 		}, nil
 	}
@@ -155,12 +184,91 @@ func TestAnalysisPassesDeadlineContextsToKubernetes(t *testing.T) {
 	if run.Status != statusComplete {
 		t.Fatalf("run status = %q, error = %q", run.Status, run.Error)
 	}
-	if !resourceContextHasDeadline.Load() || !metricsContextHasDeadline.Load() {
+	if !resourceContextHasDeadline.Load() || !metricsContextHasDeadline.Load() || !patchContextHasDeadline.Load() {
 		t.Fatalf(
-			"Kubernetes contexts had deadlines: resource=%t metrics=%t",
+			"Kubernetes contexts had deadlines: resource=%t metrics=%t patch=%t",
 			resourceContextHasDeadline.Load(),
 			metricsContextHasDeadline.Load(),
+			patchContextHasDeadline.Load(),
 		)
+	}
+	if !run.PatchDryRun {
+		t.Fatal("completed run did not record successful patch dry-run")
+	}
+	patchResponse := httptest.NewRecorder()
+	api.ServeHTTP(
+		patchResponse,
+		httptest.NewRequest(http.MethodGet, "/api/runs/"+created.RunID+"/yaml-patch", nil),
+	)
+	if patchResponse.Code != http.StatusOK || !strings.Contains(patchResponse.Body.String(), "name: app") {
+		t.Fatalf("GET yaml-patch status/body = %d/%q", patchResponse.Code, patchResponse.Body.String())
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := api.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+}
+
+func TestAnalysisDryRunErrorSuppressesRecommendationAndPatch(t *testing.T) {
+	api := New()
+	api.samplingInterval = 2 * time.Millisecond
+	var sampleNumber atomic.Int64
+	api.newKubernetesClient = func() (analysisKubernetesClient, error) {
+		return &fakeKubernetesClient{
+			getResourceSettings: func(context.Context) (corek8s.ResourceSettings, error) {
+				return corek8s.ResourceSettings{}, nil
+			},
+			getPodMetrics: func(context.Context) (corek8s.ContainerMetrics, error) {
+				return corek8s.ContainerMetrics{
+					ContainerName: "app",
+					Timestamp:     time.Now().Add(time.Duration(sampleNumber.Add(1)) * time.Millisecond),
+					Window:        time.Millisecond,
+					CPUUsage:      0.1,
+					MemoryUsage:   64,
+				}, nil
+			},
+			prepareResourcePatch: func(
+				context.Context,
+				string,
+				corek8s.Workload,
+				corek8s.ResourceSettings,
+			) (*corek8s.ResourcePatch, error) {
+				return nil, errors.New("admission policy denied dry-run")
+			},
+		}, nil
+	}
+
+	initial := RunStatus{
+		RunID:     "dry-run-error",
+		Status:    statusCreated,
+		CreatedAt: time.Now().UTC(),
+		Request: AnalyzeRequest{
+			Namespace:  "default",
+			Deployment: "api",
+			Container:  "app",
+			Duration:   "20ms",
+		},
+	}
+	if !api.startAnalysis(initial) {
+		t.Fatal("startAnalysis() = false")
+	}
+	run := waitForTerminalRun(t, api, initial.RunID)
+	if run.Status != statusFailed || !strings.Contains(run.Error, "server-side dry-run") {
+		t.Fatalf("run = %#v, want dry-run failure", run)
+	}
+	if run.Recommendation != nil || run.PatchDryRun {
+		t.Fatalf("recommendation/dry-run = %#v/%t, want suppressed", run.Recommendation, run.PatchDryRun)
+	}
+
+	response := httptest.NewRecorder()
+	api.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/api/runs/"+initial.RunID+"/yaml-patch", nil),
+	)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("YAML patch status = %d, want %d", response.Code, http.StatusConflict)
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -314,25 +422,6 @@ func TestAnalysisRejectsPartialMetricsAfterError(t *testing.T) {
 	defer cancel()
 	if err := api.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
-	}
-}
-
-func TestGenerateResourcePatchUsesResolvedContainerAndClearsDisabledLimit(t *testing.T) {
-	patch := generateResourcePatchYAML(
-		"default",
-		"api",
-		"worker",
-		recommender.Recommendations{
-			CPURequest:    0.1,
-			MemoryRequest: 64,
-			MemoryLimit:   128,
-		},
-	)
-	if !strings.Contains(patch, "name: worker") {
-		t.Fatalf("patch = %q, want resolved container", patch)
-	}
-	if !strings.Contains(patch, "limits:\n            cpu: null\n            memory: \"128Mi\"") {
-		t.Fatalf("patch = %q, want disabled CPU limit cleared", patch)
 	}
 }
 

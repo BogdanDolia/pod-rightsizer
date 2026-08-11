@@ -12,6 +12,7 @@ Pod Rightsizer measures one container in a Kubernetes Deployment during a load t
 - CPU and memory limits have separate policies: `none`, `keep`, `request-multiplier`, or `peak-multiplier`.
 - Every result includes the policy, observed statistics, confidence score with reasons, calculation explanation, and comparison with current settings.
 - CLI and Advisor API recommendations are emitted only when the load test meets its configured RPS, HTTP error-rate, and p95 latency SLO.
+- The resource patch is built as a structured Kubernetes object for the resolved Deployment/container and must pass Kubernetes server-side dry-run before it is emitted.
 
 The default CPU limit policy is `none` to avoid CPU throttling. The default memory limit is `1.2 × memory request`. A zero limit in the typed recommendation is rendered as `null` in the strategic merge patch so an existing limit is removed.
 
@@ -24,6 +25,8 @@ git clone https://github.com/BogdanDolia/pod-rightsizer.git
 cd pod-rightsizer
 go build -o pod-rightsizer ./cmd/pod-rightsizer
 ```
+
+CI checks module tidiness, formatting, `go vet`, race-enabled tests, both commands, a GoReleaser snapshot, and a kind scenario that proves `dryRun=All` leaves the target and sidecar unchanged. Tags matching `v*` publish linux amd64/arm64 archives for `pod-rightsizer` and `advisor-api`, a checksum file, and GitHub artifact attestations.
 
 ## CLI usage
 
@@ -73,7 +76,7 @@ go build -o pod-rightsizer ./cmd/pod-rightsizer
 
 `request-multiplier` multiplies the recommended request. `peak-multiplier` multiplies observed peak usage, but the resulting limit is never allowed below its request. `keep` preserves the current limit unless it would fall below the new request. `none` removes the configured limit.
 
-For `json` and `yaml`, stdout contains only the requested document; progress and status messages go to stderr. All output modes also write `resource-patch.yaml` and return a non-zero exit status if that write fails.
+For `json` and `yaml`, stdout contains only the requested document; progress and status messages go to stderr. All output modes also write `resource-patch.yaml` and return a non-zero exit status if server-side dry-run or that write fails. Pod Rightsizer never applies the patch automatically.
 
 ## Result contract
 
@@ -123,7 +126,7 @@ Confidence measures evidence quality, not whether the workload is safe. Independ
 
 ## YAML patch
 
-Text, JSON, and YAML output modes generate `resource-patch.yaml`. With the default CPU limit policy, `cpu: null` removes any existing CPU limit while the memory limit is set explicitly:
+Text, JSON, and YAML output modes generate `resource-patch.yaml` only after the Kubernetes API accepts the strategic merge patch with `dryRun=All`. The patch is serialized from a structured Kubernetes object, not assembled with YAML string interpolation. With the default CPU limit policy, `cpu: null` removes any existing CPU limit while the memory limit is set explicitly:
 
 ```yaml
 apiVersion: apps/v1
@@ -145,9 +148,12 @@ spec:
             memory: "209Mi"
 ```
 
-Review the patch before applying it:
+Pod Rightsizer stops after writing the file. Review it and repeat server-side dry-run if time has passed or the Deployment may have changed:
 
 ```bash
+kubectl patch deployment myservice-api --patch-file resource-patch.yaml --dry-run=server -o yaml
+
+# Explicit manual action only; Pod Rightsizer never runs this command.
 kubectl patch deployment myservice-api --patch-file resource-patch.yaml
 ```
 
@@ -208,8 +214,8 @@ Content-Type: application/json
 
 The response is `{ "runId": "..." }`.
 
-- `GET /api/runs/{id}` returns status and the typed recommendation.
-- `GET /api/runs/{id}/yaml-patch` returns the resource patch after completion.
+- `GET /api/runs/{id}` returns status, the typed recommendation, and `patchDryRun: true` only after server-side validation succeeds.
+- `GET /api/runs/{id}/yaml-patch` returns the stored, validated resource patch after completion.
 - `GET /api/runs/{id}/hpa-behavior` returns the default HPA behavior example.
 
 If `policy` is omitted, the defaults documented above are used. When `targetURL` is present, the API applies the same load-test SLO gate as the CLI; a failed SLO produces a failed run and no patch. If `targetURL` is empty, the API samples ambient workload metrics without generating load.
@@ -223,6 +229,7 @@ If `policy` is omitted, the defaults documented above are used. When `targetURL`
 - Only Metrics API windows fully contained in the actual load-test interval count toward `--min-samples`; increase the duration when boundary windows leave too little evidence.
 - After the measured interval, the CLI and Advisor API keep polling for one source window plus one poll interval so a final, fully contained Metrics API window has time to be published. The API fails closed when this grace would exceed two minutes.
 - Missed load-test SLOs suppress both recommendation and patch generation in the CLI and Advisor API.
+- The caller needs `patch` permission on Deployments because Kubernetes authorizes server-side dry-run like a real patch. The code always sends `dryRun=All` and has no automatic apply path.
 
 ## License
 

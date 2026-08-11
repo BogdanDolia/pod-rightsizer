@@ -17,11 +17,21 @@ spec:
         - /pod-rightsizer
         args:
         - --target=http://nginx.default.svc.cluster.local
-        - --service-name=nginx
+        - --deployment=nginx
+        - --container=nginx
         - --namespace=default
         - --duration=5m
         - --rps=500
-        - --margin=20
+        - --min-actual-rps=475
+        - --max-http-error-rate=1
+        - --max-p95-latency=1s
+        - --cpu-percentile=95
+        - --cpu-request-buffer=10
+        - --memory-buffer=20
+        - --cpu-limit-policy=none
+        - --memory-limit-policy=request-multiplier
+        - --memory-limit-multiplier=1.2
+        - --min-samples=3
         - --output-format=text
         resources:
           requests:

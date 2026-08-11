@@ -4,18 +4,17 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
-
-const defaultRequestTimeout = 30 * time.Second
 
 // ResourceSettings represents the resource requests and limits
 type ResourceSettings struct {
@@ -25,10 +24,29 @@ type ResourceSettings struct {
 	MemoryLimit   float64
 }
 
+// ContainerMetrics is one source snapshot for a container, averaged across
+// the replicas selected by a Deployment. Timestamp and Window come from the
+// Kubernetes Metrics API rather than from the local polling clock.
+type ContainerMetrics struct {
+	ContainerName string
+	Timestamp     time.Time
+	Window        time.Duration
+	CPUUsage      float64
+	MemoryUsage   float64
+}
+
+// Workload identifies a Deployment, its pods, and the container to right-size.
+// PodSelector is resolved from the Deployment rather than inferred from its name.
+type Workload struct {
+	DeploymentName string
+	ContainerName  string
+	PodSelector    string
+}
+
 // Client provides methods to interact with Kubernetes
 type Client struct {
-	clientset     *kubernetes.Clientset
-	metricsClient *metricsv.Clientset
+	clientset     k8sclient.Interface
+	metricsClient metricsclient.Interface
 }
 
 // NewClient creates a new Kubernetes client
@@ -57,19 +75,14 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 		}
 	}
 
-	config = rest.CopyConfig(config)
-	if config.Timeout <= 0 {
-		config.Timeout = defaultRequestTimeout
-	}
-
 	// Create clientset
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := k8sclient.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("error creating Kubernetes client: %v", err)
 	}
 
 	// Create metrics client
-	metricsClient, err := metricsv.NewForConfig(config)
+	metricsClient, err := metricsclient.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("error creating Metrics client: %v", err)
 	}
@@ -80,47 +93,109 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 	}, nil
 }
 
-// GetResourceSettings retrieves the current resource settings for pods matching the target
-func (c *Client) GetResourceSettings(ctx context.Context, namespace, target string) (ResourceSettings, error) {
-	// Handle different target formats (service name, deployment name, or label selector)
-	selector := extractSelector(target)
+// ResolveWorkload reads the Deployment selector and verifies that it identifies
+// at least one pod containing the explicitly selected container.
+func (c *Client) ResolveWorkload(
+	ctx context.Context,
+	namespace, deploymentName, containerName string,
+) (Workload, error) {
+	if deploymentName == "" {
+		return Workload{}, fmt.Errorf("deployment name must not be empty")
+	}
+	if containerName == "" {
+		return Workload{}, fmt.Errorf("container name must not be empty")
+	}
 
-	// Get pods using the selector
-	pods, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-	})
+	deployment, err := c.clientset.AppsV1().Deployments(namespace).Get(
+		ctx,
+		deploymentName,
+		metav1.GetOptions{},
+	)
 	if err != nil {
-		return ResourceSettings{}, fmt.Errorf("error listing pods: %v", err)
+		return Workload{}, fmt.Errorf("error getting deployment %q: %w", deploymentName, err)
 	}
 
+	selector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
+	if err != nil {
+		return Workload{}, fmt.Errorf("invalid selector on deployment %q: %w", deploymentName, err)
+	}
+	if deployment.Spec.Selector == nil ||
+		len(deployment.Spec.Selector.MatchLabels)+len(deployment.Spec.Selector.MatchExpressions) == 0 {
+		return Workload{}, fmt.Errorf("deployment %q has an empty pod selector", deploymentName)
+	}
+
+	if !hasContainer(deployment.Spec.Template.Spec.Containers, containerName) {
+		return Workload{}, fmt.Errorf(
+			"container %q not found in deployment %q",
+			containerName,
+			deploymentName,
+		)
+	}
+
+	workload := Workload{
+		DeploymentName: deploymentName,
+		ContainerName:  containerName,
+		PodSelector:    selector.String(),
+	}
+
+	pods, err := c.listWorkloadPods(ctx, namespace, workload)
+	if err != nil {
+		return Workload{}, err
+	}
 	if len(pods.Items) == 0 {
-		return ResourceSettings{}, fmt.Errorf("no pods found matching the target: %s", target)
+		return Workload{}, fmt.Errorf(
+			"no pods found for deployment %q using selector %q",
+			deploymentName,
+			workload.PodSelector,
+		)
+	}
+	for _, pod := range pods.Items {
+		if !hasContainer(pod.Spec.Containers, containerName) {
+			return Workload{}, fmt.Errorf(
+				"container %q not found in pod %q selected by deployment %q",
+				containerName,
+				pod.Name,
+				deploymentName,
+			)
+		}
 	}
 
-	// Just use the first pod to get resource settings
-	pod := pods.Items[0]
+	return workload, nil
+}
+
+// GetResourceSettings retrieves the desired settings from the Deployment pod
+// template. Reading the controller spec avoids comparing against a stale pod
+// during a rollout.
+func (c *Client) GetResourceSettings(
+	ctx context.Context,
+	namespace string,
+	workload Workload,
+) (ResourceSettings, error) {
+	deployment, err := c.clientset.AppsV1().Deployments(namespace).Get(
+		ctx,
+		workload.DeploymentName,
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		return ResourceSettings{}, fmt.Errorf(
+			"error getting deployment %q: %w",
+			workload.DeploymentName,
+			err,
+		)
+	}
+
 	settings := ResourceSettings{}
-
-	// Find the main container
-	if len(pod.Spec.Containers) == 0 {
-		return ResourceSettings{}, fmt.Errorf("pod has no containers")
+	container, ok := findContainer(deployment.Spec.Template.Spec.Containers, workload.ContainerName)
+	if !ok {
+		return ResourceSettings{}, fmt.Errorf(
+			"container %q not found in deployment %q",
+			workload.ContainerName,
+			workload.DeploymentName,
+		)
 	}
 
-	container := pod.Spec.Containers[0]
-
-	// Parse CPU request
-	if val, ok := container.Resources.Requests.Cpu().AsInt64(); ok {
-		settings.CPURequest = float64(val) / 1000
-	} else {
-		settings.CPURequest = float64(container.Resources.Requests.Cpu().MilliValue()) / 1000
-	}
-
-	// Parse CPU limit
-	if val, ok := container.Resources.Limits.Cpu().AsInt64(); ok {
-		settings.CPULimit = float64(val) / 1000
-	} else {
-		settings.CPULimit = float64(container.Resources.Limits.Cpu().MilliValue()) / 1000
-	}
+	settings.CPURequest = float64(container.Resources.Requests.Cpu().MilliValue()) / 1000
+	settings.CPULimit = float64(container.Resources.Limits.Cpu().MilliValue()) / 1000
 
 	// Parse Memory request
 	settings.MemoryRequest = float64(container.Resources.Requests.Memory().Value()) / (1024 * 1024)
@@ -131,70 +206,127 @@ func (c *Client) GetResourceSettings(ctx context.Context, namespace, target stri
 	return settings, nil
 }
 
-// GetPodMetrics retrieves current metrics for pods in the namespace matching the target
-func (c *Client) GetPodMetrics(ctx context.Context, namespace, target string) (float64, float64, error) {
-	// Handle different target formats (service name, deployment name, or label selector)
-	selector := extractSelector(target)
-
-	// Get pod metrics
+// GetPodMetrics retrieves current metrics for the selected container in pods
+// belonging to the resolved Deployment.
+func (c *Client) GetPodMetrics(
+	ctx context.Context,
+	namespace string,
+	workload Workload,
+) (ContainerMetrics, error) {
 	podMetrics, err := c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
+		LabelSelector: workload.PodSelector,
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("error getting pod metrics: %v", err)
+		return ContainerMetrics{}, fmt.Errorf("error getting pod metrics: %w", err)
 	}
 
 	if len(podMetrics.Items) == 0 {
-		return 0, 0, fmt.Errorf("no metrics found for target: %s", target)
+		return ContainerMetrics{}, fmt.Errorf(
+			"no metrics found for deployment %q using selector %q",
+			workload.DeploymentName,
+			workload.PodSelector,
+		)
 	}
 
 	var totalCPU float64
 	var totalMemory float64
 	var podCount int
+	var sourceTimestamp time.Time
+	var sourceWindow time.Duration
 
-	// Sum up metrics across all pods
 	for _, pod := range podMetrics.Items {
-		for _, container := range pod.Containers {
-			cpuQuantity := container.Usage.Cpu()
-			memQuantity := container.Usage.Memory()
-
-			// Convert CPU to cores (as float)
-			cpuValue := float64(cpuQuantity.MilliValue()) / 1000
-
-			// Convert memory to Mi
-			memoryValue := float64(memQuantity.Value()) / (1024 * 1024)
-
-			totalCPU += cpuValue
-			totalMemory += memoryValue
+		if pod.Timestamp.IsZero() {
+			return ContainerMetrics{}, fmt.Errorf(
+				"metrics for pod %q have no source timestamp",
+				pod.Name,
+			)
 		}
+		if pod.Window.Duration <= 0 {
+			return ContainerMetrics{}, fmt.Errorf(
+				"metrics for pod %q have invalid source window %s",
+				pod.Name,
+				pod.Window.Duration,
+			)
+		}
+
+		container, ok := findMetricsContainer(pod.Containers, workload.ContainerName)
+		if !ok {
+			return ContainerMetrics{}, fmt.Errorf(
+				"metrics for container %q not found in pod %q",
+				workload.ContainerName,
+				pod.Name,
+			)
+		}
+
+		// Metrics commonly arrive in nanocores. MilliValue rounds sub-millicore
+		// usage up, so use the quantity's floating-point core value instead.
+		totalCPU += container.Usage.Cpu().AsApproximateFloat64()
+		totalMemory += float64(container.Usage.Memory().Value()) / (1024 * 1024)
 		podCount++
+
+		// A workload snapshot is only as fresh as its oldest replica. Combined
+		// with the widest source window, this creates a conservative interval
+		// for deciding whether workload samples overlap.
+		if sourceTimestamp.IsZero() || pod.Timestamp.Time.Before(sourceTimestamp) {
+			sourceTimestamp = pod.Timestamp.Time
+		}
+		if pod.Window.Duration > sourceWindow {
+			sourceWindow = pod.Window.Duration
+		}
 	}
 
-	// Calculate averages
-	avgCPU := totalCPU / float64(podCount)
-	avgMemory := totalMemory / float64(podCount)
-
-	return avgCPU, avgMemory, nil
+	return ContainerMetrics{
+		ContainerName: workload.ContainerName,
+		Timestamp:     sourceTimestamp,
+		Window:        sourceWindow,
+		CPUUsage:      totalCPU / float64(podCount),
+		MemoryUsage:   totalMemory / float64(podCount),
+	}, nil
 }
 
-// Helper functions
+// Note: YAML patch generation functionality has been centralized in the output package
+// to avoid code duplication. The generateYAMLPatch function there handles this functionality.
 
-// extractSelector attempts to create a label selector from the target
-func extractSelector(target string) string {
-	// If target is a URL, extract the host part
-	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
-		parts := strings.Split(target, "//")
-		if len(parts) > 1 {
-			hostPort := strings.Split(parts[1], ":")
-			target = hostPort[0]
+func (c *Client) listWorkloadPods(
+	ctx context.Context,
+	namespace string,
+	workload Workload,
+) (*corev1.PodList, error) {
+	pods, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: workload.PodSelector,
+	})
+	if err != nil {
+		return nil, fmt.Errorf(
+			"error listing pods for deployment %q: %w",
+			workload.DeploymentName,
+			err,
+		)
+	}
+	return pods, nil
+}
+
+func findContainer(containers []corev1.Container, name string) (corev1.Container, bool) {
+	for _, container := range containers {
+		if container.Name == name {
+			return container, true
 		}
 	}
+	return corev1.Container{}, false
+}
 
-	// If target already looks like a selector, return it
-	if strings.Contains(target, "=") {
-		return target
+func hasContainer(containers []corev1.Container, name string) bool {
+	_, ok := findContainer(containers, name)
+	return ok
+}
+
+func findMetricsContainer(
+	containers []metricsv1beta1.ContainerMetrics,
+	name string,
+) (metricsv1beta1.ContainerMetrics, bool) {
+	for _, container := range containers {
+		if container.Name == name {
+			return container, true
+		}
 	}
-
-	// Default to app=target as a common label pattern
-	return fmt.Sprintf("app=%s", target)
+	return metricsv1beta1.ContainerMetrics{}, false
 }

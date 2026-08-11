@@ -29,13 +29,17 @@ func New(kubeconfigPath string, samplingInterval time.Duration) (*Provider, erro
 }
 
 // Collect samples current resource usage over the given observation window.
-func (p *Provider) Collect(ctx context.Context, namespace, deployment string, since time.Duration) ([]providermetrics.Sample, error) {
+func (p *Provider) Collect(ctx context.Context, namespace, deployment, container string, since time.Duration) ([]providermetrics.Sample, error) {
 	if since <= 0 {
 		since = 30 * time.Second
 	}
 	interval := p.samplingInterval
 
 	var samples []providermetrics.Sample
+	workload, err := p.client.ResolveWorkload(ctx, namespace, deployment, container)
+	if err != nil {
+		return nil, err
+	}
 
 	deadline := time.Now().Add(since)
 	ticker := time.NewTicker(interval)
@@ -43,12 +47,12 @@ func (p *Provider) Collect(ctx context.Context, namespace, deployment string, si
 
 	for {
 		// Collect one sample immediately on first iteration
-		cpu, mem, err := p.client.GetPodMetrics(ctx, namespace, deployment)
+		snapshot, err := p.client.GetPodMetrics(ctx, namespace, workload)
 		if err == nil {
 			samples = append(samples, providermetrics.Sample{
-				Timestamp: time.Now(),
-				CPUm:      cpu * 1000.0, // convert cores to millicores
-				MemoryMi:  mem,
+				Timestamp: snapshot.Timestamp,
+				CPUm:      snapshot.CPUUsage * 1000.0, // convert cores to millicores
+				MemoryMi:  snapshot.MemoryUsage,
 			})
 		}
 

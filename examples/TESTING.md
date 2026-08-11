@@ -95,11 +95,14 @@ go build -o advisor-api ./cmd/advisor-api
 - Fill in the form:
   - Namespace: `default`
   - Deployment: `nginx-test`
+  - Container: `nginx`
   - Service: `nginx-test` (optional)
   - Duration: `60s`
   - RPS: `50`
   - Target URL: `http://localhost:8081`
-  - Margin: `20`
+  - CPU percentile: `95`
+  - CPU request buffer: `10`
+  - Memory buffer: `20`
 - Click "Start analyze"
 
 **Via API (curl):**
@@ -111,10 +114,18 @@ RUN_ID=$(curl -s -X POST http://localhost:8080/api/analyze \
   -d '{
     "namespace": "default",
     "deployment": "nginx-test",
+    "container": "nginx",
     "serviceName": "nginx-test",
     "duration": "60s",
     "rps": 50,
-    "margin": 20,
+    "policy": {
+      "cpuPercentile": 95,
+      "cpuRequestBufferPercent": 10,
+      "memoryBufferPercent": 20,
+      "cpuLimit": {"mode": "none"},
+      "memoryLimit": {"mode": "request-multiplier", "multiplier": 1.2},
+      "minimumSamples": 3
+    },
     "targetURL": "http://localhost:8081"
   }' | jq -r '.runId')
 
@@ -174,4 +185,3 @@ kubectl delete -f examples/nginx-test.yaml
 - Load test runs against localhost:8081 (via port-forward)
 - Metrics are collected from the cluster using Metrics API
 - Results include CPU/memory recommendations with your specified margin
-

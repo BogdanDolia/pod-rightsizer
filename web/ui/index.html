@@ -8,7 +8,7 @@
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
     .row { display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
     label { display: flex; flex-direction: column; font-size: 12px; color: #444; }
-    input { padding: 6px 8px; min-width: 200px; }
+    input, select { padding: 6px 8px; min-width: 200px; }
     button { padding: 8px 12px; }
     pre { background: #f7f7f9; padding: 12px; overflow: auto; }
   </style>
@@ -18,11 +18,25 @@
       const payload = {
         namespace: document.getElementById('ns').value,
         deployment: document.getElementById('deploy').value,
+        container: document.getElementById('container').value,
         serviceName: document.getElementById('svc').value,
         duration: document.getElementById('dur').value,
         rps: Number(document.getElementById('rps').value || 0),
         concurrency: Number(document.getElementById('conc').value || 0),
-        margin: Number(document.getElementById('margin').value || 20),
+        policy: {
+          cpuPercentile: Number(document.getElementById('cpuPercentile').value || 95),
+          cpuRequestBufferPercent: Number(document.getElementById('cpuBuffer').value || 0),
+          memoryBufferPercent: Number(document.getElementById('memoryBuffer').value || 0),
+          cpuLimit: {
+            mode: document.getElementById('cpuLimitPolicy').value,
+            multiplier: Number(document.getElementById('cpuLimitMultiplier').value || 1)
+          },
+          memoryLimit: {
+            mode: document.getElementById('memoryLimitPolicy').value,
+            multiplier: Number(document.getElementById('memoryLimitMultiplier').value || 1)
+          },
+          minimumSamples: Number(document.getElementById('minSamples').value || 3)
+        },
         targetURL: document.getElementById('target').value
       };
       const res = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -58,13 +72,37 @@
     <div class="row">
       <label>Namespace<input id="ns" value="default"></label>
       <label>Deployment<input id="deploy" placeholder="my-deployment"></label>
+      <label>Container<input id="container" placeholder="app"></label>
       <label>Service (optional)<input id="svc" placeholder="my-service"></label>
     </div>
     <div class="row">
       <label>Duration<input id="dur" value="60s"></label>
       <label>RPS<input id="rps" value="50" type="number"></label>
       <label>Concurrency<input id="conc" value="0" type="number"></label>
-      <label>Margin %<input id="margin" value="20" type="number"></label>
+      <label>CPU percentile<input id="cpuPercentile" value="95" type="number" min="0.01" max="100" step="0.01"></label>
+      <label>CPU request buffer %<input id="cpuBuffer" value="10" type="number" min="0" step="0.1"></label>
+      <label>Memory buffer %<input id="memoryBuffer" value="20" type="number" min="0" step="0.1"></label>
+      <label>Minimum samples<input id="minSamples" value="3" type="number" min="2"></label>
+    </div>
+    <div class="row">
+      <label>CPU limit policy
+        <select id="cpuLimitPolicy">
+          <option value="none">none</option>
+          <option value="keep">keep</option>
+          <option value="request-multiplier">request-multiplier</option>
+          <option value="peak-multiplier">peak-multiplier</option>
+        </select>
+      </label>
+      <label>CPU limit multiplier<input id="cpuLimitMultiplier" value="1" type="number" min="1" step="0.05"></label>
+      <label>Memory limit policy
+        <select id="memoryLimitPolicy">
+          <option value="request-multiplier">request-multiplier</option>
+          <option value="peak-multiplier">peak-multiplier</option>
+          <option value="keep">keep</option>
+          <option value="none">none</option>
+        </select>
+      </label>
+      <label>Memory limit multiplier<input id="memoryLimitMultiplier" value="1.2" type="number" min="1" step="0.05"></label>
     </div>
     <div class="row">
       <label>Target URL<input id="target" placeholder="http://localhost:8080"></label>
@@ -86,4 +124,3 @@
   <pre id="hpa"># waiting...</pre>
 </body>
 </html>
-

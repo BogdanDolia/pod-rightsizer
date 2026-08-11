@@ -3,11 +3,14 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
+	"github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
 	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
 )
@@ -15,10 +18,12 @@ import (
 // Result contains all data to be presented in the output
 type Result struct {
 	Target          string
-	ServiceName     string
 	Namespace       string
+	Workload        kubernetes.Workload
 	Duration        time.Duration
 	RPS             int
+	LoadTest        loadtest.RunResult
+	LoadTestSLO     loadtest.SLO
 	CurrentSettings kubernetes.ResourceSettings
 	Metrics         []metrics.ResourceMetrics
 	Recommendations recommender.Recommendations
@@ -39,15 +44,28 @@ func PrintResults(result Result, format string) {
 // printText displays the results in a human-readable text format
 func printText(r Result) {
 	avgCPU, avgMemory := metrics.CalculateAverageMetrics(r.Metrics)
-	peakCPU, peakMemory := metrics.CalculatePeakMetrics(r.Metrics)
 
 	fmt.Println("\n===== Pod Rightsizer Results =====")
 	fmt.Printf("\nLoad Test Target: %s\n", r.Target)
-	if r.ServiceName != r.Target {
-		fmt.Printf("Service Name: %s\n", r.ServiceName)
-	}
+	fmt.Printf("Deployment: %s\n", r.Workload.DeploymentName)
+	fmt.Printf("Container: %s\n", r.Workload.ContainerName)
+	fmt.Printf("Pod Selector: %s\n", r.Workload.PodSelector)
 	fmt.Printf("Namespace: %s\n", r.Namespace)
 	fmt.Printf("Load test: %d RPS for %s\n", r.RPS, r.Duration)
+	fmt.Println("\nLoad Test Result:")
+	fmt.Printf("Actual RPS: %.2f req/s\n", r.LoadTest.ActualRPS)
+	fmt.Printf("HTTP Error Rate: %.2f%%\n", r.LoadTest.HTTPErrorRate*100)
+	fmt.Printf("Latency p50/p95/p99: %s / %s / %s\n",
+		r.LoadTest.P50Latency, r.LoadTest.P95Latency, r.LoadTest.P99Latency)
+	fmt.Printf("Termination Reason: %s\n", r.LoadTest.TerminationReason)
+	fmt.Println("Status Codes:")
+	printStatusCodes(r.LoadTest.StatusCodes)
+	fmt.Printf(
+		"SLO: minimum RPS %.2f, maximum HTTP error rate %.2f%%, maximum p95 %s\n",
+		r.LoadTestSLO.MinimumRPS,
+		r.LoadTestSLO.MaximumHTTPErrorRate*100,
+		r.LoadTestSLO.MaximumP95Latency,
+	)
 
 	fmt.Println("\nCurrent Settings:")
 	fmt.Printf("CPU Request: %.0fm\n", r.CurrentSettings.CPURequest*1000)
@@ -56,16 +74,31 @@ func printText(r Result) {
 	fmt.Printf("Memory Limit: %.0fMi\n", r.CurrentSettings.MemoryLimit)
 
 	fmt.Println("\nMetrics Collected:")
-	fmt.Printf("Peak CPU: %.0fm\n", peakCPU*1000)
+	fmt.Printf("Independent Samples: %d\n", r.Recommendations.Observed.IndependentSamples)
+	fmt.Printf("Source Resolution: %s\n", metrics.SourceResolution(r.Metrics))
+	fmt.Printf("CPU p%.2g: %.0fm\n", r.Recommendations.Observed.CPUPercentile, r.Recommendations.Observed.CPUPercentileValue*1000)
+	fmt.Printf("Peak CPU: %.0fm\n", r.Recommendations.Observed.CPUPeak*1000)
 	fmt.Printf("Average CPU: %.0fm\n", avgCPU*1000)
-	fmt.Printf("Peak Memory: %.0fMi\n", peakMemory)
+	fmt.Printf("Memory high-water mark: %.0fMi\n", r.Recommendations.Observed.MemoryHighWater)
 	fmt.Printf("Average Memory: %.0fMi\n", avgMemory)
 
 	fmt.Println("\nRecommended Settings:")
-	fmt.Printf("CPU Request: %.0fm\n", r.Recommendations.CPURequest*1000)
-	fmt.Printf("CPU Limit: %.0fm\n", r.Recommendations.CPULimit*1000)
-	fmt.Printf("Memory Request: %.0fMi\n", r.Recommendations.MemoryRequest)
-	fmt.Printf("Memory Limit: %.0fMi\n", r.Recommendations.MemoryLimit)
+	fmt.Printf("CPU Request: %.0fm\n", math.Ceil(r.Recommendations.CPURequest*1000))
+	printOptionalCPU("CPU Limit", r.Recommendations.CPULimit)
+	fmt.Printf("Memory Request: %.0fMi\n", math.Ceil(r.Recommendations.MemoryRequest))
+	printOptionalMemory("Memory Limit", r.Recommendations.MemoryLimit)
+	fmt.Printf("Confidence: %s (%.2f)\n", r.Recommendations.Confidence.Level, r.Recommendations.Confidence.Score)
+
+	fmt.Println("\nCalculation:")
+	for _, line := range r.Recommendations.Explanation {
+		fmt.Printf("- %s\n", line)
+	}
+
+	fmt.Println("\nComparison with Current Settings:")
+	printComparison("CPU request", r.Recommendations.Comparison.CPURequest, "cores")
+	printComparison("CPU limit", r.Recommendations.Comparison.CPULimit, "cores")
+	printComparison("Memory request", r.Recommendations.Comparison.MemoryRequest, "Mi")
+	printComparison("Memory limit", r.Recommendations.Comparison.MemoryLimit, "Mi")
 
 	// Generate and save YAML if using text output mode
 	patchContent, err := generateYAMLPatch(r)
@@ -86,15 +119,33 @@ func printText(r Result) {
 // printJSON displays the results in JSON format
 func printJSON(r Result) {
 	avgCPU, avgMemory := metrics.CalculateAverageMetrics(r.Metrics)
-	peakCPU, peakMemory := metrics.CalculatePeakMetrics(r.Metrics)
 
 	// Create a map with the relevant data
 	data := map[string]interface{}{
 		"loadTestTarget": r.Target,
-		"serviceName":    r.ServiceName,
+		"deploymentName": r.Workload.DeploymentName,
+		"containerName":  r.Workload.ContainerName,
+		"podSelector":    r.Workload.PodSelector,
 		"namespace":      r.Namespace,
 		"duration":       r.Duration.String(),
 		"rps":            r.RPS,
+		"loadTest": map[string]interface{}{
+			"requests":          r.LoadTest.Requests,
+			"httpErrors":        r.LoadTest.HTTPErrors,
+			"actualRPS":         r.LoadTest.ActualRPS,
+			"httpErrorRate":     r.LoadTest.HTTPErrorRate,
+			"p50Latency":        r.LoadTest.P50Latency.String(),
+			"p95Latency":        r.LoadTest.P95Latency.String(),
+			"p99Latency":        r.LoadTest.P99Latency.String(),
+			"statusCodes":       r.LoadTest.StatusCodes,
+			"duration":          r.LoadTest.Duration.String(),
+			"terminationReason": r.LoadTest.TerminationReason,
+			"slo": map[string]interface{}{
+				"minimumRPS":           r.LoadTestSLO.MinimumRPS,
+				"maximumHTTPErrorRate": r.LoadTestSLO.MaximumHTTPErrorRate,
+				"maximumP95Latency":    r.LoadTestSLO.MaximumP95Latency.String(),
+			},
+		},
 		"current": map[string]interface{}{
 			"cpuRequest":    fmt.Sprintf("%.0fm", r.CurrentSettings.CPURequest*1000),
 			"cpuLimit":      fmt.Sprintf("%.0fm", r.CurrentSettings.CPULimit*1000),
@@ -102,17 +153,16 @@ func printJSON(r Result) {
 			"memoryLimit":   fmt.Sprintf("%.0fMi", r.CurrentSettings.MemoryLimit),
 		},
 		"metrics": map[string]interface{}{
-			"peakCPU":    fmt.Sprintf("%.0fm", peakCPU*1000),
-			"averageCPU": fmt.Sprintf("%.0fm", avgCPU*1000),
-			"peakMemory": fmt.Sprintf("%.0fMi", peakMemory),
-			"avgMemory":  fmt.Sprintf("%.0fMi", avgMemory),
+			"independentSamples": r.Recommendations.Observed.IndependentSamples,
+			"sourceResolution":   metrics.SourceResolution(r.Metrics).String(),
+			"cpuPercentile":      r.Recommendations.Observed.CPUPercentile,
+			"cpuPercentileValue": fmt.Sprintf("%.0fm", r.Recommendations.Observed.CPUPercentileValue*1000),
+			"peakCPU":            fmt.Sprintf("%.0fm", r.Recommendations.Observed.CPUPeak*1000),
+			"averageCPU":         fmt.Sprintf("%.0fm", avgCPU*1000),
+			"memoryHighWater":    fmt.Sprintf("%.0fMi", r.Recommendations.Observed.MemoryHighWater),
+			"avgMemory":          fmt.Sprintf("%.0fMi", avgMemory),
 		},
-		"recommendations": map[string]interface{}{
-			"cpuRequest":    fmt.Sprintf("%.0fm", r.Recommendations.CPURequest*1000),
-			"cpuLimit":      fmt.Sprintf("%.0fm", r.Recommendations.CPULimit*1000),
-			"memoryRequest": fmt.Sprintf("%.0fMi", r.Recommendations.MemoryRequest),
-			"memoryLimit":   fmt.Sprintf("%.0fMi", r.Recommendations.MemoryLimit),
-		},
+		"recommendation": r.Recommendations,
 	}
 
 	// Marshal to JSON and print
@@ -140,6 +190,21 @@ func printJSON(r Result) {
 	fmt.Println("\nYAML patch generated in 'resource-patch.yaml'")
 }
 
+func printStatusCodes(statusCodes map[int]int) {
+	codes := make([]int, 0, len(statusCodes))
+	for code := range statusCodes {
+		codes = append(codes, code)
+	}
+	sort.Ints(codes)
+	if len(codes) == 0 {
+		fmt.Println("  no HTTP responses recorded")
+		return
+	}
+	for _, code := range codes {
+		fmt.Printf("  %d: %d\n", code, statusCodes[code])
+	}
+}
+
 // printYAML displays and saves the results in YAML format (the patch file)
 func printYAML(r Result) {
 	patchContent, err := generateYAMLPatch(r)
@@ -161,56 +226,69 @@ func printYAML(r Result) {
 
 // generateYAMLPatch creates a YAML patch for the resources
 func generateYAMLPatch(r Result) (string, error) {
-	// Create a simple deployment patch with the new resource settings
-	patch := fmt.Sprintf(`apiVersion: apps/v1
+	var patch strings.Builder
+	fmt.Fprintf(&patch, `apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: %s
-  name: %s # This assumes the deployment name matches the service name
+  name: %s
 spec:
   template:
     spec:
       containers:
-      # Note: You may need to adjust the container name to match your deployment
-      # If you have multiple containers, you'll need to specify which one to update
-      - name: app
+      - name: %s
         resources:
           requests:
             cpu: "%dm"
             memory: "%dMi"
-          limits:
-            cpu: "%dm"
-            memory: "%dMi"
 `,
 		r.Namespace,
-		extractResourceName(r.ServiceName),
-		int(r.Recommendations.CPURequest*1000),
-		int(r.Recommendations.MemoryRequest),
-		int(r.Recommendations.CPULimit*1000),
-		int(r.Recommendations.MemoryLimit),
+		r.Workload.DeploymentName,
+		r.Workload.ContainerName,
+		int(math.Ceil(r.Recommendations.CPURequest*1000)),
+		int(math.Ceil(r.Recommendations.MemoryRequest)),
 	)
+	if r.Recommendations.CPULimit > 0 || r.Recommendations.MemoryLimit > 0 {
+		patch.WriteString("          limits:\n")
+		if r.Recommendations.CPULimit > 0 {
+			fmt.Fprintf(&patch, "            cpu: \"%dm\"\n", int(math.Ceil(r.Recommendations.CPULimit*1000)))
+		}
+		if r.Recommendations.MemoryLimit > 0 {
+			fmt.Fprintf(&patch, "            memory: \"%dMi\"\n", int(math.Ceil(r.Recommendations.MemoryLimit)))
+		}
+	}
 
-	return patch, nil
+	return patch.String(), nil
 }
 
-// extractResourceName extracts a resource name from a URL or label selector
-func extractResourceName(target string) string {
-	// If target is a URL, extract the host part
-	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
-		parts := strings.Split(target, "//")
-		if len(parts) > 1 {
-			hostPort := strings.Split(parts[1], ":")
-			return hostPort[0]
-		}
+func printOptionalCPU(label string, value float64) {
+	if value == 0 {
+		fmt.Printf("%s: none\n", label)
+		return
 	}
+	fmt.Printf("%s: %.0fm\n", label, math.Ceil(value*1000))
+}
 
-	// If target is a label selector, use the value part
-	if strings.Contains(target, "=") {
-		parts := strings.Split(target, "=")
-		if len(parts) > 1 {
-			return parts[1]
-		}
+func printOptionalMemory(label string, value float64) {
+	if value == 0 {
+		fmt.Printf("%s: none\n", label)
+		return
 	}
+	fmt.Printf("%s: %.0fMi\n", label, math.Ceil(value))
+}
 
-	return target
+func printComparison(label string, comparison recommender.SettingComparison, unit string) {
+	percentage := "n/a"
+	if comparison.DeltaPercent != nil {
+		percentage = fmt.Sprintf("%+.1f%%", *comparison.DeltaPercent)
+	}
+	fmt.Printf(
+		"%s: %.3g -> %.3g %s (%s, %s)\n",
+		label,
+		comparison.Current,
+		comparison.Recommended,
+		unit,
+		comparison.Direction,
+		percentage,
+	)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,31 +14,62 @@ import (
 	"time"
 
 	corek8s "github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
+	coreloadtest "github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
+	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
 )
 
 type fakeKubernetesClient struct {
 	getResourceSettings func(context.Context) (corek8s.ResourceSettings, error)
 	getPodMetrics       func(context.Context) (float64, float64, error)
+	metricCalls         atomic.Int64
 }
 
 type fakeLoadTester func(context.Context, time.Duration) error
 
-func (tester fakeLoadTester) Run(ctx context.Context, duration time.Duration) error {
-	return tester(ctx, duration)
+func (tester fakeLoadTester) Run(ctx context.Context, duration time.Duration) (coreloadtest.RunResult, error) {
+	err := tester(ctx, duration)
+	return coreloadtest.RunResult{TerminationReason: coreloadtest.TerminationDurationElapsed}, err
+}
+
+func (client *fakeKubernetesClient) ResolveWorkload(
+	_ context.Context,
+	_, deployment, container string,
+) (corek8s.Workload, error) {
+	if container == "" {
+		container = "app"
+	}
+	return corek8s.Workload{
+		DeploymentName: deployment,
+		ContainerName:  container,
+		PodSelector:    "app=" + deployment,
+	}, nil
 }
 
 func (client *fakeKubernetesClient) GetResourceSettings(
 	ctx context.Context,
-	_, _ string,
+	_ string,
+	_ corek8s.Workload,
 ) (corek8s.ResourceSettings, error) {
 	return client.getResourceSettings(ctx)
 }
 
 func (client *fakeKubernetesClient) GetPodMetrics(
 	ctx context.Context,
-	_, _ string,
-) (float64, float64, error) {
-	return client.getPodMetrics(ctx)
+	_ string,
+	workload corek8s.Workload,
+) (corek8s.ContainerMetrics, error) {
+	cpu, memory, err := client.getPodMetrics(ctx)
+	if err != nil {
+		return corek8s.ContainerMetrics{}, err
+	}
+	sequence := client.metricCalls.Add(1)
+	return corek8s.ContainerMetrics{
+		ContainerName: workload.ContainerName,
+		Timestamp:     time.Unix(0, sequence).UTC(),
+		Window:        time.Nanosecond,
+		CPUUsage:      cpu,
+		MemoryUsage:   memory,
+	}, nil
 }
 
 func TestRunStatusSnapshotsAreRaceFree(t *testing.T) {
@@ -111,8 +143,16 @@ func TestAnalysisPassesDeadlineContextsToKubernetes(t *testing.T) {
 	body := bytes.NewBufferString(`{
 		"namespace":"default",
 		"deployment":"api",
+		"container":"app",
 		"duration":"20ms",
-		"margin":20
+		"policy":{
+			"cpuPercentile":95,
+			"cpuRequestBufferPercent":10,
+			"memoryBufferPercent":20,
+			"cpuLimit":{"mode":"none"},
+			"memoryLimit":{"mode":"request-multiplier","multiplier":1.2},
+			"minimumSamples":3
+		}
 	}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
 	response := httptest.NewRecorder()
@@ -128,6 +168,19 @@ func TestAnalysisPassesDeadlineContextsToKubernetes(t *testing.T) {
 	run := waitForTerminalRun(t, api, created.RunID)
 	if run.Status != statusComplete {
 		t.Fatalf("run status = %q, error = %q", run.Status, run.Error)
+	}
+	recommendation, ok := run.Recommendation.(recommender.Recommendations)
+	if !ok {
+		t.Fatalf("recommendation type = %T, want recommender.Recommendations", run.Recommendation)
+	}
+	if math.Abs(recommendation.CPURequest-0.11) > 1e-9 || math.Abs(recommendation.MemoryRequest-76.8) > 1e-9 {
+		t.Fatalf("recommendation = %#v, want p95 CPU + buffer and memory HWM + buffer", recommendation)
+	}
+	if recommendation.CPULimit != 0 || math.Abs(recommendation.MemoryLimit-92.16) > 1e-9 {
+		t.Fatalf("limits = %.3f/%.3f, want none/92.16", recommendation.CPULimit, recommendation.MemoryLimit)
+	}
+	if recommendation.Confidence.Level == "" || len(recommendation.Explanation) == 0 {
+		t.Fatalf("recommendation lacks confidence/explanation: %#v", recommendation)
 	}
 	if !resourceContextHasDeadline.Load() || !metricsContextHasDeadline.Load() {
 		t.Fatalf(
@@ -197,6 +250,7 @@ func TestLoadTestPanicBecomesFailedRun(t *testing.T) {
 		Request: AnalyzeRequest{
 			Namespace:  "default",
 			Deployment: "api",
+			Container:  "app",
 			Duration:   time.Second.String(),
 			TargetURL:  "http://example.test",
 		},
@@ -268,6 +322,31 @@ func TestServeHTTPRecoversPanic(t *testing.T) {
 	defer cancel()
 	if err := api.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
+	}
+}
+
+func TestGenerateResourcePatchUsesContainerAndOmitsDisabledLimit(t *testing.T) {
+	patch := generateResourcePatchYAML(
+		"shop",
+		"payments-api",
+		"worker",
+		recommender.Recommendations{
+			CPURequest:    0.1,
+			MemoryRequest: 128,
+			MemoryLimit:   256,
+		},
+	)
+	for _, expected := range []string{
+		"  name: payments-api",
+		"      - name: worker",
+		"            memory: \"256Mi\"",
+	} {
+		if !strings.Contains(patch, expected) {
+			t.Fatalf("patch does not contain %q:\n%s", expected, patch)
+		}
+	}
+	if strings.Contains(patch, "cpu: \"0m\"") {
+		t.Fatalf("patch contains disabled CPU limit:\n%s", patch)
 	}
 }
 

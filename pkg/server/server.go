@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -33,14 +34,15 @@ const (
 
 // AnalyzeRequest represents the input payload for a new analysis run.
 type AnalyzeRequest struct {
-	Namespace   string `json:"namespace"`
-	Deployment  string `json:"deployment"`
-	ServiceName string `json:"serviceName,omitempty"`
-	Duration    string `json:"duration"` // e.g. "2m"
-	RPS         int    `json:"rps,omitempty"`
-	Concurrency int    `json:"concurrency,omitempty"`
-	Margin      int    `json:"margin"`
-	TargetURL   string `json:"targetURL,omitempty"`
+	Namespace   string              `json:"namespace"`
+	Deployment  string              `json:"deployment"`
+	Container   string              `json:"container"`
+	ServiceName string              `json:"serviceName,omitempty"`
+	Duration    string              `json:"duration"` // e.g. "2m"
+	RPS         int                 `json:"rps,omitempty"`
+	Concurrency int                 `json:"concurrency,omitempty"`
+	Policy      *recommender.Policy `json:"policy,omitempty"`
+	TargetURL   string              `json:"targetURL,omitempty"`
 }
 
 // AnalyzeResponse contains the created run identifier.
@@ -63,12 +65,24 @@ type RunStatus struct {
 }
 
 type analysisKubernetesClient interface {
-	GetResourceSettings(ctx context.Context, namespace, target string) (corek8s.ResourceSettings, error)
-	GetPodMetrics(ctx context.Context, namespace, target string) (float64, float64, error)
+	ResolveWorkload(
+		ctx context.Context,
+		namespace, deploymentName, containerName string,
+	) (corek8s.Workload, error)
+	GetResourceSettings(
+		ctx context.Context,
+		namespace string,
+		workload corek8s.Workload,
+	) (corek8s.ResourceSettings, error)
+	GetPodMetrics(
+		ctx context.Context,
+		namespace string,
+		workload corek8s.Workload,
+	) (corek8s.ContainerMetrics, error)
 }
 
 type analysisLoadTester interface {
-	Run(ctx context.Context, duration time.Duration) error
+	Run(ctx context.Context, duration time.Duration) (coreloadtest.RunResult, error)
 }
 
 // Server is an HTTP handler implementing the API surface.
@@ -238,17 +252,28 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		return
 	}
 
-	currentSettings, err := k8sClient.GetResourceSettings(
+	workload, err := k8sClient.ResolveWorkload(
 		operationCtx,
 		req.Namespace,
 		req.Deployment,
+		req.Container,
+	)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("resolve workload: %w", err))
+		return
+	}
+
+	currentSettings, err := k8sClient.GetResourceSettings(
+		operationCtx,
+		req.Namespace,
+		workload,
 	)
 	if err != nil {
 		s.finishWithError(id, fmt.Errorf("get resource settings: %w", err))
 		return
 	}
 
-	collector := coremetrics.NewCollector(k8sClient, req.Namespace, req.Deployment)
+	collector := coremetrics.NewCollector(k8sClient, req.Namespace, workload)
 	measurementCtx, stopMeasurement := context.WithTimeout(operationCtx, duration)
 	defer stopMeasurement()
 
@@ -263,7 +288,8 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 					done <- fmt.Errorf("load test panic: %v", value)
 				}
 			}()
-			done <- tester.Run(operationCtx, duration)
+			_, runErr := tester.Run(operationCtx, duration)
+			done <- runErr
 		}()
 	}
 
@@ -313,19 +339,27 @@ func (s *Server) runAnalysis(parentCtx context.Context, id string, req AnalyzeRe
 		s.finishWithError(id, fmt.Errorf("load test: %w", loadTestErr))
 		return
 	}
-	if len(samples) == 0 && metricsErr != nil {
+	if metricsErr != nil {
 		s.finishWithError(id, fmt.Errorf("collect metrics: %w", metricsErr))
 		return
 	}
 
-	recommendation := recommender.GenerateRecommendations(samples, currentSettings, req.Margin)
+	policy := recommender.DefaultPolicy()
+	if req.Policy != nil {
+		policy = *req.Policy
+	}
+	recommendation, err := recommender.GenerateRecommendations(samples, currentSettings, policy)
+	if err != nil {
+		s.finishWithError(id, fmt.Errorf("generate recommendation: %w", err))
+		return
+	}
 	advice := knowledge.Evaluate(samples, recommendation)
 	completed := time.Now().UTC()
 	s.updateRun(id, func(run *RunStatus) {
 		run.Status = statusComplete
 		run.CompletedAt = &completed
 		run.Error = ""
-		run.MetricsSamples = len(samples)
+		run.MetricsSamples = recommendation.Observed.IndependentSamples
 		run.Recommendation = recommendation
 		run.Advice = advice
 	})
@@ -462,7 +496,11 @@ func (s *Server) handleGetYamlPatch(w http.ResponseWriter, r *http.Request, id s
 		name = "deployment-name"
 	}
 
-	yaml := generateResourcePatchYAML(ns, name, rec)
+	container := run.Request.Container
+	if container == "" {
+		container = "container-name"
+	}
+	yaml := generateResourcePatchYAML(ns, name, container, rec)
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	_, _ = io.WriteString(w, yaml)
 }
@@ -479,22 +517,20 @@ func (s *Server) handleGetHPABehavior(w http.ResponseWriter, r *http.Request, id
 }
 
 func formatCPUToMilli(cores float64) int {
-	// Round to nearest milli
-	return int(cores*1000 + 0.5)
+	// Round up so serialization never removes part of the safety buffer.
+	return int(math.Ceil(cores * 1000))
 }
 
 func formatMemToMi(mi float64) int {
-	return int(mi + 0.5)
+	return int(math.Ceil(mi))
 }
 
-func generateResourcePatchYAML(namespace, deploy string, r recommender.Recommendations) string {
+func generateResourcePatchYAML(namespace, deploy, container string, r recommender.Recommendations) string {
 	reqCPU := formatCPUToMilli(r.CPURequest)
-	limCPU := formatCPUToMilli(r.CPULimit)
 	reqMem := formatMemToMi(r.MemoryRequest)
-	limMem := formatMemToMi(r.MemoryLimit)
 
-	// Container name is set to 'app' as a common default; adjust as needed by the user
-	return fmt.Sprintf(`apiVersion: apps/v1
+	var patch strings.Builder
+	fmt.Fprintf(&patch, `apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: %s
@@ -503,14 +539,22 @@ spec:
   template:
     spec:
       containers:
-      - name: app
+      - name: %s
         resources:
           requests:
             cpu: "%dm"
             memory: "%dMi"
-          limits:
-            cpu: "%dm"
-            memory: "%dMi"`, namespace, deploy, reqCPU, reqMem, limCPU, limMem)
+`, namespace, deploy, container, reqCPU, reqMem)
+	if r.CPULimit > 0 || r.MemoryLimit > 0 {
+		patch.WriteString("          limits:\n")
+		if r.CPULimit > 0 {
+			fmt.Fprintf(&patch, "            cpu: \"%dm\"\n", formatCPUToMilli(r.CPULimit))
+		}
+		if r.MemoryLimit > 0 {
+			fmt.Fprintf(&patch, "            memory: \"%dMi\"\n", formatMemToMi(r.MemoryLimit))
+		}
+	}
+	return strings.TrimSuffix(patch.String(), "\n")
 }
 
 func defaultHPABehaviorYAML() string {

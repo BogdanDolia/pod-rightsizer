@@ -1,266 +1,218 @@
 # Pod Rightsizer
 
-A CLI tool to automatically determine optimal CPU and memory requests/limits for Kubernetes pods by performing load tests and analyzing resource metrics.
+Pod Rightsizer measures one container in a Kubernetes Deployment during a load test and recommends auditable CPU and memory requests/limits.
 
-## Features
+## How recommendations are calculated
 
-- **Load Testing**: Powerful HTTP load testing engine with RPS and concurrency modes
-- **Kubernetes Integration**: Connects to your cluster in-cluster or via kubeconfig
-- **Metrics Collection**: Gathers CPU and memory metrics during load tests
-- **Intelligent Recommendations**: Analyzes usage patterns to suggest optimal resource settings
-- **Multiple Output Formats**: Supports text, JSON, and YAML output formats
-- **YAML Patch Generation**: Creates ready-to-apply Kubernetes YAML patches
-- **Flexible Deployment**: Run locally or in-cluster with separate service targeting
-- **Detailed Metrics**: Provides average, peak, and percentile resource utilization
+- The Deployment's real pod selector is resolved from Kubernetes; the Deployment and container must be named explicitly.
+- Kubernetes Metrics API source timestamps and windows are used. Repeated polls and overlapping windows do not count as additional evidence.
+- CPU request is the configured CPU percentile plus a configurable request buffer. The default is `p95 + 10%`.
+- Memory request is the observed high-water mark plus a configurable buffer. The default is `max + 20%`.
+- CPU and memory limits have separate policies: `none`, `keep`, `request-multiplier`, or `peak-multiplier`.
+- Every result includes the policy, observed statistics, confidence score with reasons, calculation explanation, and comparison with current settings.
+- CLI recommendations are emitted only when the load test meets its configured RPS, HTTP error-rate, and p95 latency SLO.
 
-## Installation
+The default CPU limit policy is `none` to avoid CPU throttling. The default memory limit is `1.2 × memory request`. A zero limit in the typed recommendation means that the YAML patch omits that limit.
+
+## Build
 
 ```bash
-# Clone the repository
 git clone https://github.com/BogdanDolia/pod-rightsizer.git
 cd pod-rightsizer
-
-# Build the binary
-go build -o pod-rightsizer
+go build -o pod-rightsizer ./cmd/pod-rightsizer
 ```
 
-## Usage
-
-### Basic Usage
+## CLI usage
 
 ```bash
-# Basic usage with minimal parameters
-./pod-rightsizer --target http://localhost:8080 --service-name nginx --namespace default --duration 1m --rps 500
-```
-
-### Advanced Usage
-
-```bash
-# Using all options
 ./pod-rightsizer \
   --target http://localhost:8080 \
-  --service-name myservice \
+  --deployment myservice-api \
+  --container api \
   --namespace default \
   --duration 5m \
   --rps 50 \
-  --margin 30 \
-  --output-format yaml \
-  --kubeconfig ~/.kube/config
+  --min-actual-rps 47.5 \
+  --max-http-error-rate 1 \
+  --max-p95-latency 1s \
+  --cpu-percentile 95 \
+  --cpu-request-buffer 10 \
+  --memory-buffer 20 \
+  --cpu-limit-policy none \
+  --memory-limit-policy request-multiplier \
+  --memory-limit-multiplier 1.2 \
+  --min-samples 3 \
+  --output-format text
 ```
 
 ### Parameters
 
-- `--target`: Target service URL or identifier for load testing (required)
-- `--service-name`: Kubernetes service name for metrics collection (defaults to target if not specified)
-- `--namespace`: Kubernetes namespace (default: "default")
-- `--duration`: Duration of the load test (default: "5m")
-- `--rps`: Requests per second for load testing (default: 50)
-- `--concurrency`: Alternative to RPS, number of concurrent connections (default: 0)
-- `--margin`: Safety margin percentage to add to recommendations (default: 20)
-- `--output-format`: Output format: text, json, or yaml (default: "text")
-- `--kubeconfig`: Path to kubeconfig file for external cluster access
+- `--target`: load-test URL (required).
+- `--deployment`: Kubernetes Deployment to measure (required).
+- `--container`: container within the Deployment to measure (required).
+- `--namespace`: Kubernetes namespace (default `default`).
+- `--duration`: positive test duration up to 24 hours (default `5m`).
+- `--rps`: requested RPS, up to 10,000 (default `50`).
+- `--concurrency`: alternative fixed-worker load mode, up to 1,000 workers.
+- `--min-actual-rps`: minimum measured RPS; defaults to 95% of `--rps` in RPS mode.
+- `--max-http-error-rate`: maximum transport/non-2xx/non-3xx error percentage (default `1`).
+- `--max-p95-latency`: maximum p95 request latency (default `1s`).
+- `--cpu-percentile`: percentile used for CPU request, in `(0, 100]` (default `95`).
+- `--cpu-request-buffer`: percentage added to the CPU percentile (default `10`).
+- `--memory-buffer`: percentage added to the memory high-water mark (default `20`).
+- `--cpu-limit-policy`: `none`, `keep`, `request-multiplier`, or `peak-multiplier` (default `none`).
+- `--cpu-limit-multiplier`: CPU multiplier for a multiplier policy (default `1`).
+- `--memory-limit-policy`: same policy choices for memory (default `request-multiplier`).
+- `--memory-limit-multiplier`: memory multiplier for a multiplier policy (default `1.2`).
+- `--min-samples`: minimum independent Metrics API windows (default `3`, minimum `2`).
+- `--output-format`: `text`, `json`, or `yaml`.
+- `--kubeconfig`: kubeconfig path; otherwise in-cluster/default kubeconfig resolution is used.
 
-## Deployment Scenarios
+`request-multiplier` multiplies the recommended request. `peak-multiplier` multiplies observed peak usage, but the resulting limit is never allowed below its request. `keep` preserves the current limit unless it would fall below the new request. `none` omits the limit.
 
-### In-Cluster Usage
+## Result contract
 
-Run pod-rightsizer directly in your Kubernetes cluster to test internal services:
+The recommendation uses CPU cores and Mi internally. A shortened JSON example:
 
-```bash
-# Deploy as a pod or job in the cluster
-kubectl apply -f pod-rightsizer-job.yaml
-
-# Check the results
-kubectl logs job/pod-rightsizer
+```json
+{
+  "cpuRequest": 0.198,
+  "cpuLimit": 0,
+  "memoryRequest": 174,
+  "memoryLimit": 208.8,
+  "policy": {
+    "cpuPercentile": 95,
+    "cpuRequestBufferPercent": 10,
+    "memoryBufferPercent": 20,
+    "cpuLimit": { "mode": "none" },
+    "memoryLimit": { "mode": "request-multiplier", "multiplier": 1.2 },
+    "minimumSamples": 3
+  },
+  "observed": {
+    "independentSamples": 18,
+    "observationSeconds": 270,
+    "cpuPercentile": 95,
+    "cpuPercentileValue": 0.18,
+    "cpuPeak": 0.21,
+    "memoryHighWater": 145
+  },
+  "confidence": {
+    "level": "medium",
+    "score": 0.51,
+    "reasons": ["..."]
+  },
+  "explanation": ["..."],
+  "comparison": {
+    "cpuRequest": {
+      "current": 0.1,
+      "recommended": 0.198,
+      "delta": 0.098,
+      "deltaPercent": 98,
+      "direction": "increase"
+    }
+  }
+}
 ```
 
-### Local Testing with Port Forwarding
+Confidence measures evidence quality, not whether the workload is safe. Independent sample count contributes 80% of the score and observation duration contributes 20%; high confidence targets 30 independent windows spanning 30 minutes. Low/medium confidence results should be reviewed against representative production traffic before applying.
 
-Test Kubernetes services from your local machine using port forwarding:
+## YAML patch
 
-```bash
-# Step 1: Set up port forwarding to the service
-kubectl port-forward service/myservice 8080:80
-
-# Step 2: Run pod-rightsizer with separate target and service-name
-./pod-rightsizer \
-  --target http://localhost:8080 \
-  --service-name myservice \
-  --namespace default \
-  --duration 2m \
-  --rps 50
-```
-
-### Remote Cluster Testing
-
-Test services in a remote cluster using kubeconfig:
-
-```bash
-./pod-rightsizer \
-  --target http://service-ingress.example.com \
-  --service-name internal-service \
-  --namespace production \
-  --kubeconfig ~/.kube/production-config
-```
-
-## Example Output
-
-### Text Output (default)
-
-```
-===== Pod Rightsizer Results =====
-
-Load Test Target: http://localhost:8080
-Service Name: myservice
-Namespace: default
-Load test: 50 RPS for 5m0s
-
-Current Settings:
-CPU Request: 100m
-CPU Limit: 200m
-Memory Request: 128Mi
-Memory Limit: 256Mi
-
-Metrics Collected:
-Peak CPU: 156m
-Average CPU: 87m
-Peak Memory: 145Mi
-Average Memory: 98Mi
-
-Recommended Settings:
-CPU Request: 105m (avg + 20%)
-CPU Limit: 190m (peak + 20%)
-Memory Request: 120Mi (avg + 20%)
-Memory Limit: 175Mi (peak + 20%)
-
-YAML patch generated in 'resource-patch.yaml'
-```
-
-### Resource Patch 
-
-The generated `resource-patch.yaml` file can be directly applied to your cluster:
+Text, JSON, and YAML output modes generate `resource-patch.yaml`. With the default CPU limit policy, only the memory limit is emitted:
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: default
-  name: myservice
+  name: myservice-api
 spec:
   template:
     spec:
       containers:
-      - name: app
+      - name: api
         resources:
           requests:
-            cpu: "105m"
-            memory: "120Mi"
+            cpu: "198m"
+            memory: "174Mi"
           limits:
-            cpu: "190m"
-            memory: "175Mi"
+            memory: "209Mi"
 ```
 
-Apply the patch with:
+Review the patch before applying it:
 
 ```bash
-kubectl patch deployment myservice --patch-file resource-patch.yaml
+kubectl patch deployment myservice-api --patch-file resource-patch.yaml
 ```
+
+## Deployment scenarios
+
+For local testing, expose the target while metrics are read from the cluster:
+
+```bash
+kubectl port-forward service/myservice 8080:80
+
+./pod-rightsizer \
+  --target http://localhost:8080 \
+  --deployment myservice-api \
+  --container api \
+  --namespace default \
+  --duration 2m \
+  --rps 50
+```
+
+For in-cluster execution, customize and apply [examples/pod-rightsizer-job.yaml](examples/pod-rightsizer-job.yaml).
+
+## Advisor API
+
+Run the HTTP service and open `http://localhost:8080/`:
+
+```bash
+go run ./cmd/advisor-api
+```
+
+Create an analysis:
+
+```http
+POST /api/analyze
+Content-Type: application/json
+```
+
+```json
+{
+  "namespace": "default",
+  "deployment": "myservice-api",
+  "container": "api",
+  "duration": "60s",
+  "rps": 50,
+  "targetURL": "http://localhost:8080",
+  "policy": {
+    "cpuPercentile": 95,
+    "cpuRequestBufferPercent": 10,
+    "memoryBufferPercent": 20,
+    "cpuLimit": { "mode": "none" },
+    "memoryLimit": { "mode": "request-multiplier", "multiplier": 1.2 },
+    "minimumSamples": 3
+  }
+}
+```
+
+The response is `{ "runId": "..." }`.
+
+- `GET /api/runs/{id}` returns status and the typed recommendation.
+- `GET /api/runs/{id}/yaml-patch` returns the resource patch after completion.
+- `GET /api/runs/{id}/hpa-behavior` returns the default HPA behavior example.
+
+If `policy` is omitted, the defaults documented above are used. If `targetURL` is empty, the API samples ambient workload metrics without generating load.
 
 ## Troubleshooting
 
-If you're having issues with connectivity or metrics collection:
-
-- Ensure your service is running and accessible from where pod-rightsizer is running
-- For local testing, verify port forwarding is working correctly
-- Check that the service has the appropriate Kubernetes labels for selection
-- Verify the metrics server is running in your cluster
-- Increase verbosity by redirecting stderr to a file for detailed error messages
-
-## Building and Pushing Docker Image
-
-To run pod-rightsizer as a Kubernetes job, you'll need to build and push a Docker image:
-
-```bash
-# Build the Docker image
-docker build -t yourusername/pod-rightsizer:latest .
-
-# Login to Docker Hub (or your preferred registry)
-docker login
-
-# Push the image
-docker push yourusername/pod-rightsizer:latest
-```
-
-## Running as a Kubernetes Job
-
-A sample Kubernetes job definition is provided in `pod-rightsizer-job.yaml`. This includes:
-
-1. A Job resource to run pod-rightsizer
-2. A ServiceAccount with necessary permissions
-3. RBAC Role and RoleBinding to allow metrics collection
-
-To use it:
-
-1. Edit `pod-rightsizer-job.yaml` to change the target service, namespace, and other parameters
-2. Apply the YAML to your cluster:
-
-```bash
-kubectl apply -f pod-rightsizer-job.yaml
-```
-
-3. Monitor the job:
-
-```bash
-kubectl logs job/pod-rightsizer -f
-```
-
-The job will analyze the specified service and output resource recommendations, which you can then apply to your deployment.
+- Ensure the Deployment selector matches running pods and `--container` exactly matches a container name.
+- Verify Metrics Server access with `kubectl top pods`.
+- Use a duration long enough to capture at least `--min-samples` non-overlapping source windows. Repeated timestamps do not increase confidence.
+- Any Metrics API collection error invalidates the run; a partial prefix is not used.
+- For CLI runs, missed load-test SLOs suppress both recommendation and patch generation.
 
 ## License
 
 MIT
-
-## Advisor API (MVP)
-
-A lightweight HTTP service to orchestrate a short load test, collect Kubernetes metrics and produce recommendations + ready‑to‑apply YAML.
-
-### Run locally (Windows/macOS/Linux)
-
-```bash
-go run ./cmd/advisor-api
-# or build
-go build -o advisor-api ./cmd/advisor-api && ./advisor-api
-# PORT can be set via env (default 8080)
-```
-
-Requires access to your cluster via kubeconfig (`$HOME/.kube/config`) or in‑cluster config if running inside Kubernetes.
-
-Open `http://localhost:8080/` for a minimal UI.
-
-### API
-
-- POST `/api/analyze`
-  - body:
-  ```json
-  {
-    "namespace": "default",
-    "deployment": "my-deployment",
-    "serviceName": "my-service",
-    "duration": "60s",
-    "rps": 50,
-    "concurrency": 0,
-    "margin": 20,
-    "targetURL": "http://localhost:8080"
-  }
-  ```
-  - response: `{ "runId": "..." }`
-
-- GET `/api/runs/{id}` — status, metrics count, recommendations and advice
-- GET `/api/runs/{id}/yaml-patch` — YAML patch with requests/limits
-- GET `/api/runs/{id}/hpa-behavior` — default HPA behavior YAML (tunable in UI later)
-
-### Notes
-
-- Load generation uses the built‑in HTTP load tester; if `targetURL` is empty, only metrics will be sampled.
-- Metrics source: Kubernetes Metrics API. Prometheus/DataDog providers can be added later.
-- Container name in the generated patch defaults to `app` — adjust to your deployment as needed.

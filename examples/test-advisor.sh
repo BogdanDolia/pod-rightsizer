@@ -48,4 +48,3 @@ trap "kill $PF_PID 2>/dev/null || true" EXIT
 # Start advisor API
 cd "$(dirname "$0")/.."
 go run ./cmd/advisor-api
-

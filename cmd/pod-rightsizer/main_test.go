@@ -206,6 +206,13 @@ func TestValidateConfigRejectsInvalidInput(t *testing.T) {
 			wantErr: "either --rps or --concurrency must be greater than zero",
 		},
 		{
+			name: "ambiguous load mode",
+			update: func(cfg *Config) {
+				cfg.Concurrency = 1
+			},
+			wantErr: "--rps and --concurrency are mutually exclusive",
+		},
+		{
 			name: "negative RPS",
 			update: func(cfg *Config) {
 				cfg.RPS = -1

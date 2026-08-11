@@ -5,16 +5,19 @@ Pod Rightsizer measures one container in a Kubernetes Deployment during a load t
 ## How recommendations are calculated
 
 - The Deployment's real pod selector is resolved from Kubernetes; the Deployment and container must be named explicitly.
-- Kubernetes Metrics API source timestamps and windows are used. Repeated polls and overlapping windows do not count as additional evidence.
+- Kubernetes Metrics API source timestamps and windows are used. Repeated polls and overlapping windows do not count as additional evidence, and only windows fully contained in the measured load-test interval are eligible.
+- A Deployment rollout must be stable and its generation must remain unchanged throughout each collection. Every active selected pod must have a Metrics API entry; each snapshot uses the highest CPU and memory usage among those replicas so a missing or hot pod cannot be hidden by an average.
 - CPU request is the configured CPU percentile plus a configurable request buffer. The default is `p95 + 10%`.
 - Memory request is the observed high-water mark plus a configurable buffer. The default is `max + 20%`.
 - CPU and memory limits have separate policies: `none`, `keep`, `request-multiplier`, or `peak-multiplier`.
 - Every result includes the policy, observed statistics, confidence score with reasons, calculation explanation, and comparison with current settings.
-- CLI recommendations are emitted only when the load test meets its configured RPS, HTTP error-rate, and p95 latency SLO.
+- CLI and Advisor API recommendations are emitted only when the load test meets its configured RPS, HTTP error-rate, and p95 latency SLO.
 
-The default CPU limit policy is `none` to avoid CPU throttling. The default memory limit is `1.2 × memory request`. A zero limit in the typed recommendation means that the YAML patch omits that limit.
+The default CPU limit policy is `none` to avoid CPU throttling. The default memory limit is `1.2 × memory request`. A zero limit in the typed recommendation is rendered as `null` in the strategic merge patch so an existing limit is removed.
 
 ## Build
+
+Go 1.25 or newer is required.
 
 ```bash
 git clone https://github.com/BogdanDolia/pod-rightsizer.git
@@ -53,7 +56,7 @@ go build -o pod-rightsizer ./cmd/pod-rightsizer
 - `--namespace`: Kubernetes namespace (default `default`).
 - `--duration`: positive test duration up to 24 hours (default `5m`).
 - `--rps`: requested RPS, up to 10,000 (default `50`).
-- `--concurrency`: alternative fixed-worker load mode, up to 1,000 workers.
+- `--concurrency`: alternative fixed-worker load mode, up to 1,000 workers. It is mutually exclusive with `--rps`; set `--rps=0` when selecting this mode.
 - `--min-actual-rps`: minimum measured RPS; defaults to 95% of `--rps` in RPS mode.
 - `--max-http-error-rate`: maximum transport/non-2xx/non-3xx error percentage (default `1`).
 - `--max-p95-latency`: maximum p95 request latency (default `1s`).
@@ -68,7 +71,9 @@ go build -o pod-rightsizer ./cmd/pod-rightsizer
 - `--output-format`: `text`, `json`, or `yaml`.
 - `--kubeconfig`: kubeconfig path; otherwise in-cluster/default kubeconfig resolution is used.
 
-`request-multiplier` multiplies the recommended request. `peak-multiplier` multiplies observed peak usage, but the resulting limit is never allowed below its request. `keep` preserves the current limit unless it would fall below the new request. `none` omits the limit.
+`request-multiplier` multiplies the recommended request. `peak-multiplier` multiplies observed peak usage, but the resulting limit is never allowed below its request. `keep` preserves the current limit unless it would fall below the new request. `none` removes the configured limit.
+
+For `json` and `yaml`, stdout contains only the requested document; progress and status messages go to stderr. All output modes also write `resource-patch.yaml` and return a non-zero exit status if that write fails.
 
 ## Result contract
 
@@ -118,7 +123,7 @@ Confidence measures evidence quality, not whether the workload is safe. Independ
 
 ## YAML patch
 
-Text, JSON, and YAML output modes generate `resource-patch.yaml`. With the default CPU limit policy, only the memory limit is emitted:
+Text, JSON, and YAML output modes generate `resource-patch.yaml`. With the default CPU limit policy, `cpu: null` removes any existing CPU limit while the memory limit is set explicitly:
 
 ```yaml
 apiVersion: apps/v1
@@ -136,6 +141,7 @@ spec:
             cpu: "198m"
             memory: "174Mi"
           limits:
+            cpu: null
             memory: "209Mi"
 ```
 
@@ -185,6 +191,9 @@ Content-Type: application/json
   "container": "api",
   "duration": "60s",
   "rps": 50,
+  "minimumActualRPS": 47.5,
+  "maximumHTTPErrorRate": 1,
+  "maximumP95Latency": "1s",
   "targetURL": "http://localhost:8080",
   "policy": {
     "cpuPercentile": 95,
@@ -203,15 +212,17 @@ The response is `{ "runId": "..." }`.
 - `GET /api/runs/{id}/yaml-patch` returns the resource patch after completion.
 - `GET /api/runs/{id}/hpa-behavior` returns the default HPA behavior example.
 
-If `policy` is omitted, the defaults documented above are used. If `targetURL` is empty, the API samples ambient workload metrics without generating load.
+If `policy` is omitted, the defaults documented above are used. When `targetURL` is present, the API applies the same load-test SLO gate as the CLI; a failed SLO produces a failed run and no patch. If `targetURL` is empty, the API samples ambient workload metrics without generating load.
 
 ## Troubleshooting
 
-- Ensure the Deployment selector matches running pods and `--container` exactly matches a container name.
+- Ensure the Deployment rollout is complete, its selector matches ready pods, and `--container` exactly matches a container name.
 - Verify Metrics Server access with `kubectl top pods`.
 - Use a duration long enough to capture at least `--min-samples` non-overlapping source windows. Repeated timestamps do not increase confidence.
 - Any Metrics API collection error invalidates the run; a partial prefix is not used.
-- For CLI runs, missed load-test SLOs suppress both recommendation and patch generation.
+- Only Metrics API windows fully contained in the actual load-test interval count toward `--min-samples`; increase the duration when boundary windows leave too little evidence.
+- After the measured interval, the CLI and Advisor API keep polling for one source window plus one poll interval so a final, fully contained Metrics API window has time to be published. The API fails closed when this grace would exceed two minutes.
+- Missed load-test SLOs suppress both recommendation and patch generation in the CLI and Advisor API.
 
 ## License
 

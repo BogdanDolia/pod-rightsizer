@@ -15,6 +15,7 @@
   <script>
     async function startAnalyze(ev) {
       ev.preventDefault();
+      const statusEl = document.getElementById('status');
       const payload = {
         namespace: document.getElementById('ns').value,
         deployment: document.getElementById('deploy').value,
@@ -37,12 +38,24 @@
           },
           minimumSamples: Number(document.getElementById('minSamples').value || 3)
         },
-        targetURL: document.getElementById('target').value
+        targetURL: document.getElementById('target').value,
+        minimumActualRPS: Number(document.getElementById('minActualRPS').value || 0),
+        maximumHTTPErrorRate: Number(document.getElementById('maxErrors').value),
+        maximumP95Latency: document.getElementById('maxP95').value
       };
-      const res = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const data = await res.json();
-      document.getElementById('runId').textContent = data.runId;
-      pollStatus(data.runId);
+      try {
+        const res = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const responseBody = await res.text();
+        if (!res.ok) {
+          statusEl.textContent = responseBody.trim();
+          return;
+        }
+        const data = JSON.parse(responseBody);
+        document.getElementById('runId').textContent = data.runId;
+        pollStatus(data.runId);
+      } catch (error) {
+        statusEl.textContent = 'Request failed: ' + error.message;
+      }
     }
     async function pollStatus(id) {
       const statusEl = document.getElementById('status');
@@ -50,17 +63,26 @@
       const yamlPatchEl = document.getElementById('yamlPatch');
       const hpaEl = document.getElementById('hpa');
       const timer = setInterval(async () => {
-        const resp = await fetch('/api/runs/' + id);
-        if (!resp.ok) return;
-        const run = await resp.json();
-        statusEl.textContent = run.status + ' (' + run.metricsSamples + ' samples)';
-        recEl.textContent = JSON.stringify(run.recommendation || {}, null, 2);
-        if (run.status === 'completed') {
+        try {
+          const resp = await fetch('/api/runs/' + id);
+          if (!resp.ok) throw new Error((await resp.text()).trim() || ('HTTP ' + resp.status));
+          const run = await resp.json();
+          statusEl.textContent = run.status + ' (' + run.metricsSamples + ' samples)';
+          recEl.textContent = JSON.stringify(run.recommendation || {}, null, 2);
+          if (run.status === 'failed') {
+            clearInterval(timer);
+            statusEl.textContent += ': ' + run.error;
+            return;
+          }
+          if (run.status !== 'completed') return;
           clearInterval(timer);
           const y = await fetch('/api/runs/' + id + '/yaml-patch');
           yamlPatchEl.textContent = await y.text();
           const h = await fetch('/api/runs/' + id + '/hpa-behavior');
           hpaEl.textContent = await h.text();
+        } catch (error) {
+          clearInterval(timer);
+          statusEl.textContent = 'Status request failed: ' + error.message;
         }
       }, 2000);
     }
@@ -77,8 +99,8 @@
     </div>
     <div class="row">
       <label>Duration<input id="dur" value="60s"></label>
-      <label>RPS<input id="rps" value="50" type="number"></label>
-      <label>Concurrency<input id="conc" value="0" type="number"></label>
+      <label>RPS<input id="rps" value="50" type="number" oninput="if (Number(this.value) > 0) document.getElementById('conc').value = 0"></label>
+      <label>Concurrency<input id="conc" value="0" type="number" oninput="if (Number(this.value) > 0) document.getElementById('rps').value = 0"></label>
       <label>CPU percentile<input id="cpuPercentile" value="95" type="number" min="0.01" max="100" step="0.01"></label>
       <label>CPU request buffer %<input id="cpuBuffer" value="10" type="number" min="0" step="0.1"></label>
       <label>Memory buffer %<input id="memoryBuffer" value="20" type="number" min="0" step="0.1"></label>
@@ -106,6 +128,9 @@
     </div>
     <div class="row">
       <label>Target URL<input id="target" placeholder="http://localhost:8080"></label>
+      <label>Min actual RPS (0 = auto)<input id="minActualRPS" value="0" type="number" min="0" step="0.1"></label>
+      <label>Max HTTP errors %<input id="maxErrors" value="1" type="number" min="0" max="100" step="0.1"></label>
+      <label>Max p95 latency<input id="maxP95" value="1s"></label>
     </div>
     <button type="submit">Start analyze</button>
   </form>

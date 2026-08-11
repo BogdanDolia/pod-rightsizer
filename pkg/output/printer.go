@@ -22,6 +22,7 @@ type Result struct {
 	Workload        kubernetes.Workload
 	Duration        time.Duration
 	RPS             int
+	Concurrency     int
 	LoadTest        loadtest.RunResult
 	LoadTestSLO     loadtest.SLO
 	CurrentSettings kubernetes.ResourceSettings
@@ -29,20 +30,21 @@ type Result struct {
 	Recommendations recommender.Recommendations
 }
 
-// PrintResults displays the results in the specified format
-func PrintResults(result Result, format string) {
+// PrintResults displays the results in the specified format and writes the
+// strategic merge patch to resource-patch.yaml.
+func PrintResults(result Result, format string) error {
 	switch format {
 	case "json":
-		printJSON(result)
+		return printJSON(result)
 	case "yaml":
-		printYAML(result)
+		return printYAML(result)
 	default:
-		printText(result)
+		return printText(result)
 	}
 }
 
 // printText displays the results in a human-readable text format
-func printText(r Result) {
+func printText(r Result) error {
 	avgCPU, avgMemory := metrics.CalculateAverageMetrics(r.Metrics)
 
 	fmt.Println("\n===== Pod Rightsizer Results =====")
@@ -51,7 +53,11 @@ func printText(r Result) {
 	fmt.Printf("Container: %s\n", r.Workload.ContainerName)
 	fmt.Printf("Pod Selector: %s\n", r.Workload.PodSelector)
 	fmt.Printf("Namespace: %s\n", r.Namespace)
-	fmt.Printf("Load test: %d RPS for %s\n", r.RPS, r.Duration)
+	if r.Concurrency > 0 {
+		fmt.Printf("Load test: %d concurrent workers for %s\n", r.Concurrency, r.Duration)
+	} else {
+		fmt.Printf("Load test: %d RPS for %s\n", r.RPS, r.Duration)
+	}
 	fmt.Println("\nLoad Test Result:")
 	fmt.Printf("Actual RPS: %.2f req/s\n", r.LoadTest.ActualRPS)
 	fmt.Printf("HTTP Error Rate: %.2f%%\n", r.LoadTest.HTTPErrorRate*100)
@@ -103,21 +109,19 @@ func printText(r Result) {
 	// Generate and save YAML if using text output mode
 	patchContent, err := generateYAMLPatch(r)
 	if err != nil {
-		fmt.Printf("\nError generating YAML patch: %v\n", err)
-		return
+		return fmt.Errorf("generate YAML patch: %w", err)
 	}
 
-	err = os.WriteFile("resource-patch.yaml", []byte(patchContent), 0644)
-	if err != nil {
-		fmt.Printf("\nError writing YAML patch file: %v\n", err)
-		return
+	if err := os.WriteFile("resource-patch.yaml", []byte(patchContent), 0644); err != nil {
+		return fmt.Errorf("write resource-patch.yaml: %w", err)
 	}
 
 	fmt.Println("\nYAML patch generated in 'resource-patch.yaml'")
+	return nil
 }
 
 // printJSON displays the results in JSON format
-func printJSON(r Result) {
+func printJSON(r Result) error {
 	avgCPU, avgMemory := metrics.CalculateAverageMetrics(r.Metrics)
 
 	// Create a map with the relevant data
@@ -129,6 +133,7 @@ func printJSON(r Result) {
 		"namespace":      r.Namespace,
 		"duration":       r.Duration.String(),
 		"rps":            r.RPS,
+		"concurrency":    r.Concurrency,
 		"loadTest": map[string]interface{}{
 			"requests":          r.LoadTest.Requests,
 			"httpErrors":        r.LoadTest.HTTPErrors,
@@ -168,8 +173,7 @@ func printJSON(r Result) {
 	// Marshal to JSON and print
 	jsonBytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling JSON: %v\n", err)
-		return
+		return fmt.Errorf("marshal JSON output: %w", err)
 	}
 
 	fmt.Println(string(jsonBytes))
@@ -177,17 +181,15 @@ func printJSON(r Result) {
 	// Generate and save YAML if using json output mode
 	patchContent, err := generateYAMLPatch(r)
 	if err != nil {
-		fmt.Printf("\nError generating YAML patch: %v\n", err)
-		return
+		return fmt.Errorf("generate YAML patch: %w", err)
 	}
 
-	err = os.WriteFile("resource-patch.yaml", []byte(patchContent), 0644)
-	if err != nil {
-		fmt.Printf("\nError writing YAML patch file: %v\n", err)
-		return
+	if err := os.WriteFile("resource-patch.yaml", []byte(patchContent), 0644); err != nil {
+		return fmt.Errorf("write resource-patch.yaml: %w", err)
 	}
 
-	fmt.Println("\nYAML patch generated in 'resource-patch.yaml'")
+	fmt.Fprintln(os.Stderr, "YAML patch generated in 'resource-patch.yaml'")
+	return nil
 }
 
 func printStatusCodes(statusCodes map[int]int) {
@@ -206,26 +208,39 @@ func printStatusCodes(statusCodes map[int]int) {
 }
 
 // printYAML displays and saves the results in YAML format (the patch file)
-func printYAML(r Result) {
+func printYAML(r Result) error {
 	patchContent, err := generateYAMLPatch(r)
 	if err != nil {
-		fmt.Printf("Error generating YAML patch: %v\n", err)
-		return
+		return fmt.Errorf("generate YAML patch: %w", err)
 	}
 
-	fmt.Println(patchContent)
+	fmt.Print(patchContent)
 
-	err = os.WriteFile("resource-patch.yaml", []byte(patchContent), 0644)
-	if err != nil {
-		fmt.Printf("\nError writing YAML patch file: %v\n", err)
-		return
+	if err := os.WriteFile("resource-patch.yaml", []byte(patchContent), 0644); err != nil {
+		return fmt.Errorf("write resource-patch.yaml: %w", err)
 	}
 
-	fmt.Println("\nYAML patch saved to 'resource-patch.yaml'")
+	fmt.Fprintln(os.Stderr, "YAML patch saved to 'resource-patch.yaml'")
+	return nil
 }
 
 // generateYAMLPatch creates a YAML patch for the resources
 func generateYAMLPatch(r Result) (string, error) {
+	return GenerateResourcePatch(
+		r.Namespace,
+		r.Workload.DeploymentName,
+		r.Workload.ContainerName,
+		r.Recommendations,
+	), nil
+}
+
+// GenerateResourcePatch renders a strategic merge patch for one Deployment
+// container. A zero recommendation limit is emitted as null so applying the
+// patch removes an existing limit instead of preserving it.
+func GenerateResourcePatch(
+	namespace, deployment, container string,
+	recommendation recommender.Recommendations,
+) string {
 	var patch strings.Builder
 	fmt.Fprintf(&patch, `apiVersion: apps/v1
 kind: Deployment
@@ -242,23 +257,27 @@ spec:
             cpu: "%dm"
             memory: "%dMi"
 `,
-		r.Namespace,
-		r.Workload.DeploymentName,
-		r.Workload.ContainerName,
-		int(math.Ceil(r.Recommendations.CPURequest*1000)),
-		int(math.Ceil(r.Recommendations.MemoryRequest)),
+		namespace,
+		deployment,
+		container,
+		int(math.Ceil(recommendation.CPURequest*1000)),
+		int(math.Ceil(recommendation.MemoryRequest)),
 	)
-	if r.Recommendations.CPULimit > 0 || r.Recommendations.MemoryLimit > 0 {
-		patch.WriteString("          limits:\n")
-		if r.Recommendations.CPULimit > 0 {
-			fmt.Fprintf(&patch, "            cpu: \"%dm\"\n", int(math.Ceil(r.Recommendations.CPULimit*1000)))
-		}
-		if r.Recommendations.MemoryLimit > 0 {
-			fmt.Fprintf(&patch, "            memory: \"%dMi\"\n", int(math.Ceil(r.Recommendations.MemoryLimit)))
-		}
+	// Strategic merge patches preserve omitted map keys. Emit null explicitly
+	// when a policy disables a limit so an existing Deployment limit is removed.
+	patch.WriteString("          limits:\n")
+	if recommendation.CPULimit > 0 {
+		fmt.Fprintf(&patch, "            cpu: \"%dm\"\n", int(math.Ceil(recommendation.CPULimit*1000)))
+	} else {
+		patch.WriteString("            cpu: null\n")
+	}
+	if recommendation.MemoryLimit > 0 {
+		fmt.Fprintf(&patch, "            memory: \"%dMi\"\n", int(math.Ceil(recommendation.MemoryLimit)))
+	} else {
+		patch.WriteString("            memory: null\n")
 	}
 
-	return patch.String(), nil
+	return patch.String()
 }
 
 func printOptionalCPU(label string, value float64) {

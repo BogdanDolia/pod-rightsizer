@@ -134,6 +134,27 @@ func TestLimitNeverFallsBelowRequest(t *testing.T) {
 	if recommendation.MemoryLimit < recommendation.MemoryRequest {
 		t.Fatalf("memory limit %.1f is below request %.1f", recommendation.MemoryLimit, recommendation.MemoryRequest)
 	}
+	if !strings.Contains(strings.Join(recommendation.Explanation, " "), "then is normalized") {
+		t.Fatalf("explanation does not disclose limit normalization: %#v", recommendation.Explanation)
+	}
+}
+
+func TestKeepLimitExplanationDisclosesResourceFloor(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.CPULimit = LimitPolicy{Mode: LimitKeep}
+	recommendation, err := GenerateRecommendations(
+		sampleSeries(3, func(int) (float64, float64) { return 0.005, 100 }),
+		kubernetes.ResourceSettings{CPULimit: 0.02},
+		policy,
+	)
+	if err != nil {
+		t.Fatalf("GenerateRecommendations() error = %v", err)
+	}
+	joined := strings.Join(recommendation.Explanation, " ")
+	if !strings.Contains(joined, "current value 0.02") ||
+		!strings.Contains(joined, "resource floor") {
+		t.Fatalf("explanation does not disclose keep normalization: %#v", recommendation.Explanation)
+	}
 }
 
 func TestGenerateRecommendationsRequiresIndependentSamples(t *testing.T) {

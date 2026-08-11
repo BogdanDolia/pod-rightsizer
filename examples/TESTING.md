@@ -54,7 +54,9 @@ Then open http://localhost:8080 in your browser and fill in:
 - Duration: `60s`
 - RPS: `50`
 - Target URL: `http://localhost:8081`
-- Margin: `20`
+- CPU percentile: `95`
+- CPU request buffer: `10`
+- Memory buffer: `20`
 
 Click "Start analyze" and watch the results!
 
@@ -118,6 +120,9 @@ RUN_ID=$(curl -s -X POST http://localhost:8080/api/analyze \
     "serviceName": "nginx-test",
     "duration": "60s",
     "rps": 50,
+    "minimumActualRPS": 47.5,
+    "maximumHTTPErrorRate": 1,
+    "maximumP95Latency": "1s",
     "policy": {
       "cpuPercentile": 95,
       "cpuRequestBufferPercent": 10,
@@ -169,7 +174,7 @@ kubectl delete -f examples/nginx-test.yaml
 
 - **Port 8080 already in use**: Set `PORT=8081` env var before starting advisor API
 - **Cannot connect to cluster**: Check `kubectl get pods` works, verify kubeconfig
-- **No metrics / "error getting pod metrics"**: 
+- **No metrics / "error getting pod metrics"**:
   - Run `./examples/check-metrics-server.sh` to diagnose
   - Ensure metrics-server is installed and running:
     ```bash
@@ -184,4 +189,8 @@ kubectl delete -f examples/nginx-test.yaml
 - The nginx deployment starts with minimal resources (10m CPU, 16Mi memory) to make recommendations more visible
 - Load test runs against localhost:8081 (via port-forward)
 - Metrics are collected from the cluster using Metrics API
-- Results include CPU/memory recommendations with your specified margin
+- The Deployment rollout must be complete before analysis starts
+- RPS and fixed-concurrency modes are mutually exclusive; set RPS to `0` when selecting concurrency mode
+- Every active selected replica must be present in each Metrics API snapshot
+- Only Metrics API windows fully contained in the load-test interval count as evidence
+- Results include CPU/memory recommendations with the policy and buffers selected above

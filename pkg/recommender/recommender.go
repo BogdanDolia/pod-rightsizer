@@ -202,8 +202,8 @@ func GenerateRecommendations(
 		},
 		Confidence: confidence(len(independent), observation),
 	}
-	recommendation.Explanation = explanation(recommendation)
 	recommendation.Comparison = compare(currentSettings, recommendation)
+	recommendation.Explanation = explanation(recommendation, currentSettings)
 	return recommendation, nil
 }
 
@@ -384,7 +384,10 @@ func roundScore(value float64) float64 {
 	return math.Round(value*100) / 100
 }
 
-func explanation(recommendation Recommendations) []string {
+func explanation(
+	recommendation Recommendations,
+	currentSettings kubernetes.ResourceSettings,
+) []string {
 	policy := recommendation.Policy
 	observed := recommendation.Observed
 	return []string{
@@ -401,8 +404,8 @@ func explanation(recommendation Recommendations) []string {
 			observed.MemoryHighWater,
 			policy.MemoryBufferPercent,
 		),
-		limitExplanation("CPU", recommendation.CPULimit, policy.CPULimit, recommendation.CPURequest, observed.CPUPeak),
-		limitExplanation("Memory", recommendation.MemoryLimit, policy.MemoryLimit, recommendation.MemoryRequest, observed.MemoryHighWater),
+		limitExplanation("CPU", recommendation.CPULimit, policy.CPULimit, currentSettings.CPULimit, recommendation.CPURequest, observed.CPUPeak),
+		limitExplanation("Memory", recommendation.MemoryLimit, policy.MemoryLimit, currentSettings.MemoryLimit, recommendation.MemoryRequest, observed.MemoryHighWater),
 		fmt.Sprintf(
 			"Confidence is %s (%.2f) from %d independent windows spanning %.0f seconds",
 			recommendation.Confidence.Level,
@@ -413,16 +416,35 @@ func explanation(recommendation Recommendations) []string {
 	}
 }
 
-func limitExplanation(resource string, value float64, policy LimitPolicy, request, peak float64) string {
+func limitExplanation(
+	resource string,
+	value float64,
+	policy LimitPolicy,
+	current, request, peak float64,
+) string {
 	switch policy.Mode {
 	case LimitNone:
 		return fmt.Sprintf("%s limit is omitted by policy to avoid an enforced ceiling", resource)
 	case LimitKeep:
-		return fmt.Sprintf("%s limit uses the current value, raised to the new request if necessary; result %.3g", resource, value)
+		message := fmt.Sprintf("%s limit %.3g starts from the current value %.3g", resource, value, current)
+		if math.Abs(value-current) > 1e-9 {
+			message += ", then is normalized to stay at or above the new request and resource floor"
+		}
+		return message
 	case LimitRequestMultiplier:
-		return fmt.Sprintf("%s limit %.3g = request %.3g times %.3g", resource, value, request, policy.Multiplier)
+		raw := request * policy.Multiplier
+		message := fmt.Sprintf("%s limit %.3g starts from request %.3g times %.3g", resource, value, request, policy.Multiplier)
+		if math.Abs(value-raw) > 1e-9 {
+			message += fmt.Sprintf(" = %.3g, then is normalized to stay at or above the request and resource floor", raw)
+		}
+		return message
 	case LimitPeakMultiplier:
-		return fmt.Sprintf("%s limit %.3g = observed peak %.3g times %.3g, never below request", resource, value, peak, policy.Multiplier)
+		raw := peak * policy.Multiplier
+		message := fmt.Sprintf("%s limit %.3g starts from observed peak %.3g times %.3g", resource, value, peak, policy.Multiplier)
+		if math.Abs(value-raw) > 1e-9 {
+			message += fmt.Sprintf(" = %.3g, then is normalized to stay at or above the request and resource floor", raw)
+		}
+		return message
 	default:
 		return fmt.Sprintf("%s limit policy is unsupported", resource)
 	}

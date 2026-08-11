@@ -56,8 +56,10 @@ const (
 )
 
 type loadTestOutcome struct {
-	Result loadtest.RunResult
-	Err    error
+	Result     loadtest.RunResult
+	Err        error
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 func main() {
@@ -80,7 +82,7 @@ func main() {
 	}
 
 	// Resolve the Deployment's real pod selector and validate the target container.
-	fmt.Printf("Resolving deployment '%s' and container '%s' in namespace '%s'...\n",
+	fmt.Fprintf(os.Stderr, "Resolving deployment '%s' and container '%s' in namespace '%s'...\n",
 		cfg.DeploymentName, cfg.ContainerName, cfg.Namespace)
 	workload, err := k8sClient.ResolveWorkload(
 		ctx,
@@ -94,7 +96,7 @@ func main() {
 	}
 
 	// Get initial resource settings to compare against
-	fmt.Println("Fetching current resource settings...")
+	fmt.Fprintln(os.Stderr, "Fetching current resource settings...")
 	currentSettings, err := k8sClient.GetResourceSettings(ctx, cfg.Namespace, workload)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting current resource settings: %v\n", err)
@@ -102,16 +104,20 @@ func main() {
 	}
 
 	// Initialize metrics collector
-	fmt.Printf("Initializing metrics collector for deployment '%s', container '%s'...\n",
+	fmt.Fprintf(os.Stderr, "Initializing metrics collector for deployment '%s', container '%s'...\n",
 		workload.DeploymentName, workload.ContainerName)
 	metricsCollector := metrics.NewCollector(k8sClient, cfg.Namespace, workload)
 
 	// Initialize load tester
-	fmt.Println("Initializing load test...")
+	fmt.Fprintln(os.Stderr, "Initializing load test...")
 	loadTester := loadtest.NewTester(cfg.Target, cfg.RPS, cfg.Concurrency)
 
 	// Run load test and collect metrics
-	fmt.Printf("Starting load test (%d RPS for %s)...\n", cfg.RPS, cfg.Duration)
+	loadMode := fmt.Sprintf("%d RPS", cfg.RPS)
+	if cfg.Concurrency > 0 {
+		loadMode = fmt.Sprintf("%d concurrent workers", cfg.Concurrency)
+	}
+	fmt.Fprintf(os.Stderr, "Starting load test (%s for %s)...\n", loadMode, cfg.Duration)
 	metricsChan := make(chan metrics.ResourceMetrics)
 	metricsErrChan := make(chan error, 1)
 
@@ -132,8 +138,14 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		startedAt := time.Now().UTC()
 		result, err := loadTester.Run(ctx, cfg.Duration)
-		resultChan <- loadTestOutcome{Result: result, Err: err}
+		resultChan <- loadTestOutcome{
+			Result:     result,
+			Err:        err,
+			StartedAt:  startedAt,
+			FinishedAt: time.Now().UTC(),
+		}
 	}()
 
 	// Collect metrics and fail the entire run on either a source error or a load
@@ -141,6 +153,8 @@ func main() {
 	var allMetrics []metrics.ResourceMetrics
 	var runErr error
 	var loadTestResult loadtest.RunResult
+	var loadTestStartedAt time.Time
+	var loadTestFinishedAt time.Time
 	loadTestFinished := false
 	var finalMetricsTimer *time.Timer
 	var finalMetricsDone <-chan time.Time
@@ -154,7 +168,8 @@ collectionLoop:
 				continue
 			}
 			allMetrics = append(allMetrics, m)
-			fmt.Printf(
+			fmt.Fprintf(
+				os.Stderr,
 				"Collected metrics for container %s - CPU: %.1fm, Memory: %.1fMi (source: %s, window: %s)\n",
 				m.ContainerName,
 				m.CPUUsage*1000,
@@ -169,18 +184,21 @@ collectionLoop:
 			loadTestFinished = true
 			resultChan = nil
 			loadTestResult = outcome.Result
+			loadTestStartedAt = outcome.StartedAt
+			loadTestFinishedAt = outcome.FinishedAt
 			if outcome.Err != nil {
 				runErr = fmt.Errorf("load test failed: %w", outcome.Err)
 				break collectionLoop
 			}
 
-			fmt.Println("Load test completed successfully.")
+			fmt.Fprintln(os.Stderr, "Load test completed successfully.")
 			resolution := metrics.SourceResolution(allMetrics)
 			if resolution <= 0 {
 				break collectionLoop
 			}
 			// Give the source one complete window plus one poll interval to
-			// publish the final snapshot that overlaps the load test.
+			// publish a final snapshot whose source window is fully contained
+			// in the load test.
 			finalMetricsTimer = time.NewTimer(resolution + minimumMetricsPollInterval)
 			finalMetricsDone = finalMetricsTimer.C
 		case <-finalMetricsDone:
@@ -218,10 +236,19 @@ collectionLoop:
 		fmt.Fprintln(os.Stderr, "Cannot generate recommendations: load test did not complete")
 		os.Exit(1)
 	}
-
-	fmt.Println("Analyzing metrics and generating recommendations...")
-	recommendations, err := buildRecommendations(
+	measurementMetrics, err := metrics.FullyContainedSamples(
 		allMetrics,
+		loadTestStartedAt,
+		loadTestFinishedAt,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot validate measurement window: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintln(os.Stderr, "Analyzing metrics and generating recommendations...")
+	recommendations, err := buildRecommendations(
+		measurementMetrics,
 		currentSettings,
 		recommendationPolicy(cfg),
 		runErr,
@@ -240,14 +267,18 @@ collectionLoop:
 		Workload:        workload,
 		Duration:        cfg.Duration,
 		RPS:             cfg.RPS,
+		Concurrency:     cfg.Concurrency,
 		LoadTest:        loadTestResult,
 		LoadTestSLO:     loadTestSLO(cfg),
 		CurrentSettings: currentSettings,
-		Metrics:         allMetrics,
+		Metrics:         measurementMetrics,
 		Recommendations: recommendations,
 	}
 
-	output.PrintResults(result, cfg.OutputFormat)
+	if err := output.PrintResults(result, cfg.OutputFormat); err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot write results: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func parseFlags() Config {
@@ -371,6 +402,9 @@ func validateConfig(cfg Config) error {
 	if cfg.RPS == 0 && cfg.Concurrency == 0 {
 		return errors.New("either --rps or --concurrency must be greater than zero")
 	}
+	if cfg.RPS > 0 && cfg.Concurrency > 0 {
+		return errors.New("--rps and --concurrency are mutually exclusive")
+	}
 	if math.IsNaN(cfg.MinimumActualRPS) || math.IsInf(cfg.MinimumActualRPS, 0) || cfg.MinimumActualRPS < 0 {
 		return errors.New("--min-actual-rps must be a finite non-negative number")
 	}
@@ -427,7 +461,6 @@ func collectMetrics(
 	defer timer.Stop()
 
 	var lastObserved metrics.ResourceMetrics
-	var lastEmitted metrics.ResourceMetrics
 	for {
 		select {
 		case <-ctx.Done():
@@ -469,13 +502,13 @@ func collectMetrics(
 
 		if lastObserved.Timestamp.IsZero() || sample.Timestamp.After(lastObserved.Timestamp) {
 			lastObserved = sample
-			if lastEmitted.Timestamp.IsZero() || metrics.IsIndependentAfter(lastEmitted, sample) {
-				select {
-				case metricsChan <- sample:
-					lastEmitted = sample
-				case <-ctx.Done():
-					return
-				}
+			// Preserve every new source snapshot. IndependentSamples later keeps
+			// overlapping windows from inflating evidence while retaining their
+			// conservative CPU and memory maxima.
+			select {
+			case metricsChan <- sample:
+			case <-ctx.Done():
+				return
 			}
 		}
 

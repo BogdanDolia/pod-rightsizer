@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sclient "k8s.io/client-go/kubernetes"
@@ -16,6 +18,8 @@ import (
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
+const defaultRequestTimeout = 30 * time.Second
+
 // ResourceSettings represents the resource requests and limits
 type ResourceSettings struct {
 	CPURequest    float64
@@ -24,9 +28,10 @@ type ResourceSettings struct {
 	MemoryLimit   float64
 }
 
-// ContainerMetrics is one source snapshot for a container, averaged across
-// the replicas selected by a Deployment. Timestamp and Window come from the
-// Kubernetes Metrics API rather than from the local polling clock.
+// ContainerMetrics is one conservative source snapshot for a container. CPU
+// and memory are the per-resource maxima across the replicas selected by a
+// Deployment. Timestamp and Window envelope every replica's Metrics API source
+// interval rather than using the local polling clock.
 type ContainerMetrics struct {
 	ContainerName string
 	Timestamp     time.Time
@@ -38,9 +43,10 @@ type ContainerMetrics struct {
 // Workload identifies a Deployment, its pods, and the container to right-size.
 // PodSelector is resolved from the Deployment rather than inferred from its name.
 type Workload struct {
-	DeploymentName string
-	ContainerName  string
-	PodSelector    string
+	DeploymentName       string
+	DeploymentGeneration int64
+	ContainerName        string
+	PodSelector          string
 }
 
 // Client provides methods to interact with Kubernetes
@@ -74,6 +80,7 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 			return nil, fmt.Errorf("error building kubeconfig: %v", err)
 		}
 	}
+	config = configWithDefaultRequestTimeout(config)
 
 	// Create clientset
 	clientset, err := k8sclient.NewForConfig(config)
@@ -114,6 +121,9 @@ func (c *Client) ResolveWorkload(
 	if err != nil {
 		return Workload{}, fmt.Errorf("error getting deployment %q: %w", deploymentName, err)
 	}
+	if err := validateStableDeployment(deployment); err != nil {
+		return Workload{}, err
+	}
 
 	selector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
 	if err != nil {
@@ -133,9 +143,10 @@ func (c *Client) ResolveWorkload(
 	}
 
 	workload := Workload{
-		DeploymentName: deploymentName,
-		ContainerName:  containerName,
-		PodSelector:    selector.String(),
+		DeploymentName:       deploymentName,
+		DeploymentGeneration: deployment.Generation,
+		ContainerName:        containerName,
+		PodSelector:          selector.String(),
 	}
 
 	pods, err := c.listWorkloadPods(ctx, namespace, workload)
@@ -183,6 +194,9 @@ func (c *Client) GetResourceSettings(
 			err,
 		)
 	}
+	if err := validateResolvedDeployment(deployment, workload); err != nil {
+		return ResourceSettings{}, err
+	}
 
 	settings := ResourceSettings{}
 	container, ok := findContainer(deployment.Spec.Template.Spec.Containers, workload.ContainerName)
@@ -213,6 +227,46 @@ func (c *Client) GetPodMetrics(
 	namespace string,
 	workload Workload,
 ) (ContainerMetrics, error) {
+	var resolvedDeployment *appsv1.Deployment
+	if workload.DeploymentGeneration > 0 {
+		deployment, err := c.clientset.AppsV1().Deployments(namespace).Get(
+			ctx,
+			workload.DeploymentName,
+			metav1.GetOptions{},
+		)
+		if err != nil {
+			return ContainerMetrics{}, fmt.Errorf(
+				"error rechecking deployment %q: %w",
+				workload.DeploymentName,
+				err,
+			)
+		}
+		if err := validateResolvedDeployment(deployment, workload); err != nil {
+			return ContainerMetrics{}, err
+		}
+		resolvedDeployment = deployment
+	}
+
+	pods, err := c.listWorkloadPods(ctx, namespace, workload)
+	if err != nil {
+		return ContainerMetrics{}, err
+	}
+	expectedPods, err := expectedMetricPods(pods.Items, workload)
+	if err != nil {
+		return ContainerMetrics{}, err
+	}
+	if resolvedDeployment != nil {
+		desiredReplicas := desiredDeploymentReplicas(resolvedDeployment)
+		if len(expectedPods) != int(desiredReplicas) {
+			return ContainerMetrics{}, fmt.Errorf(
+				"deployment %q pod set changed during analysis: found %d active selected pods, want %d",
+				workload.DeploymentName,
+				len(expectedPods),
+				desiredReplicas,
+			)
+		}
+	}
+
 	podMetrics, err := c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: workload.PodSelector,
 	})
@@ -228,13 +282,24 @@ func (c *Client) GetPodMetrics(
 		)
 	}
 
-	var totalCPU float64
-	var totalMemory float64
-	var podCount int
-	var sourceTimestamp time.Time
-	var sourceWindow time.Duration
+	var maximumCPU float64
+	var maximumMemory float64
+	var earliestSourceStart time.Time
+	var latestSourceEnd time.Time
+	seenPods := make(map[string]struct{}, len(podMetrics.Items))
 
 	for _, pod := range podMetrics.Items {
+		if _, ok := expectedPods[pod.Name]; !ok {
+			return ContainerMetrics{}, fmt.Errorf(
+				"metrics returned unexpected pod %q for deployment %q",
+				pod.Name,
+				workload.DeploymentName,
+			)
+		}
+		if _, duplicate := seenPods[pod.Name]; duplicate {
+			return ContainerMetrics{}, fmt.Errorf("metrics returned pod %q more than once", pod.Name)
+		}
+		seenPods[pod.Name] = struct{}{}
 		if pod.Timestamp.IsZero() {
 			return ContainerMetrics{}, fmt.Errorf(
 				"metrics for pod %q have no source timestamp",
@@ -258,29 +323,72 @@ func (c *Client) GetPodMetrics(
 			)
 		}
 
-		// Metrics commonly arrive in nanocores. MilliValue rounds sub-millicore
-		// usage up, so use the quantity's floating-point core value instead.
-		totalCPU += container.Usage.Cpu().AsApproximateFloat64()
-		totalMemory += float64(container.Usage.Memory().Value()) / (1024 * 1024)
-		podCount++
-
-		// A workload snapshot is only as fresh as its oldest replica. Combined
-		// with the widest source window, this creates a conservative interval
-		// for deciding whether workload samples overlap.
-		if sourceTimestamp.IsZero() || pod.Timestamp.Time.Before(sourceTimestamp) {
-			sourceTimestamp = pod.Timestamp.Time
+		// Requests and limits are applied to each replica, so averaging can hide a
+		// hot pod and produce an unsafe recommendation. Keep the maximum observed
+		// usage for each resource instead.
+		cpuUsage := container.Usage.Cpu().AsApproximateFloat64()
+		memoryUsage := float64(container.Usage.Memory().Value()) / (1024 * 1024)
+		if cpuUsage < 0 || memoryUsage < 0 {
+			return ContainerMetrics{}, fmt.Errorf(
+				"metrics for container %q in pod %q contain negative usage",
+				workload.ContainerName,
+				pod.Name,
+			)
 		}
-		if pod.Window.Duration > sourceWindow {
-			sourceWindow = pod.Window.Duration
+		if cpuUsage > maximumCPU {
+			maximumCPU = cpuUsage
+		}
+		if memoryUsage > maximumMemory {
+			maximumMemory = memoryUsage
+		}
+
+		sourceStart := pod.Timestamp.Time.Add(-pod.Window.Duration)
+		if earliestSourceStart.IsZero() || sourceStart.Before(earliestSourceStart) {
+			earliestSourceStart = sourceStart
+		}
+		if latestSourceEnd.IsZero() || pod.Timestamp.Time.After(latestSourceEnd) {
+			latestSourceEnd = pod.Timestamp.Time
+		}
+	}
+
+	missingPods := make([]string, 0)
+	for podName := range expectedPods {
+		if _, ok := seenPods[podName]; !ok {
+			missingPods = append(missingPods, podName)
+		}
+	}
+	if len(missingPods) > 0 {
+		sort.Strings(missingPods)
+		return ContainerMetrics{}, fmt.Errorf(
+			"metrics missing for deployment %q pods %q",
+			workload.DeploymentName,
+			missingPods,
+		)
+	}
+	if workload.DeploymentGeneration > 0 {
+		deployment, err := c.clientset.AppsV1().Deployments(namespace).Get(
+			ctx,
+			workload.DeploymentName,
+			metav1.GetOptions{},
+		)
+		if err != nil {
+			return ContainerMetrics{}, fmt.Errorf(
+				"error rechecking deployment %q after metrics collection: %w",
+				workload.DeploymentName,
+				err,
+			)
+		}
+		if err := validateResolvedDeployment(deployment, workload); err != nil {
+			return ContainerMetrics{}, err
 		}
 	}
 
 	return ContainerMetrics{
 		ContainerName: workload.ContainerName,
-		Timestamp:     sourceTimestamp,
-		Window:        sourceWindow,
-		CPUUsage:      totalCPU / float64(podCount),
-		MemoryUsage:   totalMemory / float64(podCount),
+		Timestamp:     latestSourceEnd,
+		Window:        latestSourceEnd.Sub(earliestSourceStart),
+		CPUUsage:      maximumCPU,
+		MemoryUsage:   maximumMemory,
 	}, nil
 }
 
@@ -303,6 +411,91 @@ func (c *Client) listWorkloadPods(
 		)
 	}
 	return pods, nil
+}
+
+func configWithDefaultRequestTimeout(config *rest.Config) *rest.Config {
+	configCopy := rest.CopyConfig(config)
+	if configCopy.Timeout <= 0 {
+		configCopy.Timeout = defaultRequestTimeout
+	}
+	return configCopy
+}
+
+func validateStableDeployment(deployment *appsv1.Deployment) error {
+	desiredReplicas := desiredDeploymentReplicas(deployment)
+	status := deployment.Status
+	if status.ObservedGeneration < deployment.Generation ||
+		status.Replicas != desiredReplicas ||
+		status.UpdatedReplicas != desiredReplicas ||
+		status.ReadyReplicas != desiredReplicas ||
+		status.AvailableReplicas != desiredReplicas ||
+		status.UnavailableReplicas != 0 {
+		return fmt.Errorf(
+			"deployment %q rollout is not stable: desired=%d replicas=%d updated=%d ready=%d available=%d unavailable=%d observedGeneration=%d generation=%d",
+			deployment.Name,
+			desiredReplicas,
+			status.Replicas,
+			status.UpdatedReplicas,
+			status.ReadyReplicas,
+			status.AvailableReplicas,
+			status.UnavailableReplicas,
+			status.ObservedGeneration,
+			deployment.Generation,
+		)
+	}
+	return nil
+}
+
+func desiredDeploymentReplicas(deployment *appsv1.Deployment) int32 {
+	if deployment.Spec.Replicas == nil {
+		return 1
+	}
+	return *deployment.Spec.Replicas
+}
+
+func expectedMetricPods(
+	pods []corev1.Pod,
+	workload Workload,
+) (map[string]struct{}, error) {
+	expected := make(map[string]struct{}, len(pods))
+	for _, pod := range pods {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if !hasContainer(pod.Spec.Containers, workload.ContainerName) {
+			return nil, fmt.Errorf(
+				"container %q not found in active pod %q selected by deployment %q",
+				workload.ContainerName,
+				pod.Name,
+				workload.DeploymentName,
+			)
+		}
+		expected[pod.Name] = struct{}{}
+	}
+	if len(expected) == 0 {
+		return nil, fmt.Errorf(
+			"no active pods found for deployment %q using selector %q",
+			workload.DeploymentName,
+			workload.PodSelector,
+		)
+	}
+	return expected, nil
+}
+
+func validateResolvedDeployment(deployment *appsv1.Deployment, workload Workload) error {
+	if err := validateStableDeployment(deployment); err != nil {
+		return err
+	}
+	if workload.DeploymentGeneration > 0 &&
+		deployment.Generation != workload.DeploymentGeneration {
+		return fmt.Errorf(
+			"deployment %q changed generation during analysis: started at %d, now %d",
+			deployment.Name,
+			workload.DeploymentGeneration,
+			deployment.Generation,
+		)
+	}
+	return nil
 }
 
 func findContainer(containers []corev1.Container, name string) (corev1.Container, bool) {

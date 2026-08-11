@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
@@ -92,7 +93,16 @@ func TestGetPodMetricsUsesOnlyExplicitContainer(t *testing.T) {
 
 	client := newTestClient(
 		t,
-		nil,
+		[]runtime.Object{
+			testPod("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}),
+			testPod("payments-def", map[string]string{
+				"component": "payments",
+				"track":     "canary",
+			}),
+		},
 		[]runtime.Object{
 			stableMetrics,
 			canaryMetrics,
@@ -114,17 +124,93 @@ func TestGetPodMetricsUsesOnlyExplicitContainer(t *testing.T) {
 	if metrics.ContainerName != "worker" {
 		t.Fatalf("ContainerName = %q, want worker", metrics.ContainerName)
 	}
-	if metrics.CPUUsage != 0.2 {
-		t.Fatalf("CPU average = %v, want 0.2", metrics.CPUUsage)
+	if metrics.CPUUsage != 0.3 {
+		t.Fatalf("CPU replica high-water = %v, want 0.3", metrics.CPUUsage)
 	}
-	if metrics.MemoryUsage != 128 {
-		t.Fatalf("memory average = %v, want 128", metrics.MemoryUsage)
+	if metrics.MemoryUsage != 192 {
+		t.Fatalf("memory replica high-water = %v, want 192", metrics.MemoryUsage)
 	}
-	if !metrics.Timestamp.Equal(testMetricsTimestamp) {
-		t.Fatalf("Timestamp = %s, want source timestamp %s", metrics.Timestamp, testMetricsTimestamp)
+	expectedTimestamp := testMetricsTimestamp.Add(5 * time.Second)
+	if !metrics.Timestamp.Equal(expectedTimestamp) {
+		t.Fatalf("Timestamp = %s, want source envelope end %s", metrics.Timestamp, expectedTimestamp)
 	}
 	if metrics.Window != 30*time.Second {
-		t.Fatalf("Window = %s, want conservative source window 30s", metrics.Window)
+		t.Fatalf("Window = %s, want source envelope window 30s", metrics.Window)
+	}
+}
+
+func TestResolveWorkloadRejectsUnstableRollout(t *testing.T) {
+	deployment := testDeployment()
+	deployment.Status.UpdatedReplicas = 0
+	deployment.Status.UnavailableReplicas = 1
+	client := newTestClient(
+		t,
+		[]runtime.Object{
+			deployment,
+			testPod("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}),
+		},
+		nil,
+	)
+
+	_, err := client.ResolveWorkload(context.Background(), "shop", "payments", "worker")
+	if err == nil || !strings.Contains(err.Error(), "rollout is not stable") {
+		t.Fatalf("ResolveWorkload() error = %v, want unstable rollout error", err)
+	}
+}
+
+func TestGetResourceSettingsRejectsDeploymentGenerationChange(t *testing.T) {
+	client := newTestClient(
+		t,
+		[]runtime.Object{
+			testDeployment(),
+			testPod("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}),
+		},
+		nil,
+	)
+	workload, err := client.ResolveWorkload(context.Background(), "shop", "payments", "worker")
+	if err != nil {
+		t.Fatalf("ResolveWorkload() error = %v", err)
+	}
+	changed := testDeployment()
+	changed.Generation = 3
+	changed.Status.ObservedGeneration = 3
+	if _, err := client.clientset.AppsV1().Deployments("shop").Update(
+		context.Background(),
+		changed,
+		metav1.UpdateOptions{},
+	); err != nil {
+		t.Fatalf("update deployment: %v", err)
+	}
+
+	_, err = client.GetResourceSettings(context.Background(), "shop", workload)
+	if err == nil || !strings.Contains(err.Error(), "changed generation during analysis") {
+		t.Fatalf("GetResourceSettings() error = %v, want generation change error", err)
+	}
+}
+
+func TestConfigWithDefaultRequestTimeoutCopiesAndPreservesConfig(t *testing.T) {
+	original := &rest.Config{Host: "https://cluster.example"}
+	configured := configWithDefaultRequestTimeout(original)
+	if configured == original {
+		t.Fatal("configWithDefaultRequestTimeout() returned the caller's config")
+	}
+	if original.Timeout != 0 {
+		t.Fatalf("original timeout = %s, want unchanged zero", original.Timeout)
+	}
+	if configured.Timeout != defaultRequestTimeout {
+		t.Fatalf("configured timeout = %s, want %s", configured.Timeout, defaultRequestTimeout)
+	}
+
+	original.Timeout = 7 * time.Second
+	configured = configWithDefaultRequestTimeout(original)
+	if configured.Timeout != 7*time.Second {
+		t.Fatalf("configured timeout = %s, want caller value 7s", configured.Timeout)
 	}
 }
 
@@ -137,7 +223,11 @@ func TestGetPodMetricsRejectsMissingSourceMetadata(t *testing.T) {
 	)
 	podMetrics.Timestamp = metav1.Time{}
 
-	client := newTestClient(t, nil, []runtime.Object{podMetrics})
+	client := newTestClient(
+		t,
+		[]runtime.Object{testPod("payments-abc", map[string]string{"component": "payments"})},
+		[]runtime.Object{podMetrics},
+	)
 	_, err := client.GetPodMetrics(context.Background(), "shop", Workload{
 		DeploymentName: "payments",
 		ContainerName:  "worker",
@@ -155,7 +245,11 @@ func TestGetPodMetricsPreservesSubMillicorePrecision(t *testing.T) {
 		"1500u",
 		"64Mi",
 	)
-	client := newTestClient(t, nil, []runtime.Object{podMetrics})
+	client := newTestClient(
+		t,
+		[]runtime.Object{testPod("payments-abc", map[string]string{"component": "payments"})},
+		[]runtime.Object{podMetrics},
+	)
 
 	snapshot, err := client.GetPodMetrics(context.Background(), "shop", Workload{
 		DeploymentName: "payments",
@@ -167,6 +261,101 @@ func TestGetPodMetricsPreservesSubMillicorePrecision(t *testing.T) {
 	}
 	if snapshot.CPUUsage != 0.0015 {
 		t.Fatalf("CPU usage = %.6f cores, want 0.0015 without millicore rounding", snapshot.CPUUsage)
+	}
+}
+
+func TestGetPodMetricsRejectsPartialReplicaCoverage(t *testing.T) {
+	deployment := testDeployment()
+	replicas := int32(2)
+	deployment.Spec.Replicas = &replicas
+	deployment.Status.Replicas = replicas
+	deployment.Status.UpdatedReplicas = replicas
+	deployment.Status.ReadyReplicas = replicas
+	deployment.Status.AvailableReplicas = replicas
+
+	client := newTestClient(
+		t,
+		[]runtime.Object{
+			deployment,
+			testPod("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}),
+			testPod("payments-def", map[string]string{
+				"component": "payments",
+				"track":     "canary",
+			}),
+		},
+		[]runtime.Object{
+			testPodMetrics("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}, "100m", "64Mi"),
+		},
+	)
+	workload, err := client.ResolveWorkload(
+		context.Background(),
+		"shop",
+		"payments",
+		"worker",
+	)
+	if err != nil {
+		t.Fatalf("ResolveWorkload() error = %v", err)
+	}
+
+	_, err = client.GetPodMetrics(context.Background(), "shop", workload)
+	if err == nil || !strings.Contains(err.Error(), "metrics missing") {
+		t.Fatalf("GetPodMetrics() error = %v, want missing replica metrics", err)
+	}
+}
+
+func TestGetPodMetricsRejectsGenerationChangeDuringCollection(t *testing.T) {
+	client := newTestClient(
+		t,
+		[]runtime.Object{
+			testDeployment(),
+			testPod("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}),
+		},
+		[]runtime.Object{
+			testPodMetrics("payments-abc", map[string]string{
+				"component": "payments",
+				"track":     "stable",
+			}, "100m", "64Mi"),
+		},
+	)
+	workload, err := client.ResolveWorkload(
+		context.Background(),
+		"shop",
+		"payments",
+		"worker",
+	)
+	if err != nil {
+		t.Fatalf("ResolveWorkload() error = %v", err)
+	}
+	client.metricsClient.(*metricsfake.Clientset).PrependReactor(
+		"list",
+		"pods",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			changed := testDeployment()
+			changed.Generation = 3
+			changed.Status.ObservedGeneration = 3
+			if _, updateErr := client.clientset.AppsV1().Deployments("shop").Update(
+				context.Background(),
+				changed,
+				metav1.UpdateOptions{},
+			); updateErr != nil {
+				return true, nil, updateErr
+			}
+			return false, nil, nil
+		},
+	)
+
+	_, err = client.GetPodMetrics(context.Background(), "shop", workload)
+	if err == nil || !strings.Contains(err.Error(), "changed generation during analysis") {
+		t.Fatalf("GetPodMetrics() error = %v, want in-flight generation change", err)
 	}
 }
 
@@ -214,9 +403,10 @@ func newTestClient(
 	metricsClient := metricsfake.NewSimpleClientset()
 	metricsClient.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		list := &metricsv1beta1.PodMetricsList{}
+		selector := action.(k8stesting.ListAction).GetListRestrictions().Labels
 		for _, object := range metricObjects {
 			metric := object.(*metricsv1beta1.PodMetrics)
-			if metric.Namespace == action.GetNamespace() {
+			if metric.Namespace == action.GetNamespace() && selector.Matches(labels.Set(metric.Labels)) {
 				list.Items = append(list.Items, *metric)
 			}
 		}
@@ -230,7 +420,7 @@ func newTestClient(
 
 func testDeployment() *appsv1.Deployment {
 	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "payments", Namespace: "shop"},
+		ObjectMeta: metav1.ObjectMeta{Name: "payments", Namespace: "shop", Generation: 2},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"component": "payments"},
@@ -245,6 +435,14 @@ func testDeployment() *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{Containers: testContainers()},
 			},
+		},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration:  2,
+			Replicas:            1,
+			UpdatedReplicas:     1,
+			ReadyReplicas:       1,
+			AvailableReplicas:   1,
+			UnavailableReplicas: 0,
 		},
 	}
 }

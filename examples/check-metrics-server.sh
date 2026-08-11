@@ -8,11 +8,11 @@ echo "=== Checking for metrics-server ==="
 # Check if metrics-server deployment exists
 if kubectl get deployment metrics-server -n kube-system &>/dev/null; then
     echo "✓ metrics-server deployment found"
-    
+
     # Check if it's ready
     READY=$(kubectl get deployment metrics-server -n kube-system -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
     DESIRED=$(kubectl get deployment metrics-server -n kube-system -o jsonpath='{.status.replicas}' 2>/dev/null || echo "0")
-    
+
     if [ "$READY" = "$DESIRED" ] && [ "$READY" != "0" ]; then
         echo "✓ metrics-server is running ($READY/$DESIRED pods ready)"
     else
@@ -77,4 +77,3 @@ fi
 
 echo ""
 echo "=== Advisor will be able to collect metrics ✓ ==="
-

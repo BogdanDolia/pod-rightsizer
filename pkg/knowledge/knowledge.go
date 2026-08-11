@@ -7,7 +7,7 @@ import (
 
 // Evaluate returns a list of best-practices suggestions based on collected samples and recommendations.
 // This is a minimal starter; rules can be expanded and loaded from YAML later.
-func Evaluate(samples []coremetrics.ResourceMetrics, rec recommender.Recommendations) []string {
+func Evaluate(_ []coremetrics.ResourceMetrics, rec recommender.Recommendations) []string {
 	var advice []string
 
 	// CPU: keep HPA target utilization around ~70% for stability
@@ -24,8 +24,9 @@ func Evaluate(samples []coremetrics.ResourceMetrics, rec recommender.Recommendat
 		advice = append(advice, "Set memory limit comfortably above request to reduce OOM risk (>=20%).")
 	}
 
-	// If we have few samples, warn about reliability
-	if len(samples) < 3 {
+	// Use the independently validated evidence count. Repeated raw polls must
+	// not hide a low-sample warning.
+	if rec.Observed.IndependentSamples < 3 {
 		advice = append(advice, "Few metric samples collected; consider a longer test duration for better accuracy.")
 	}
 

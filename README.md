@@ -233,4 +233,4 @@ If `policy` is omitted, the defaults documented above are used. When `targetURL`
 
 ## License
 
-MIT
+Apache-2.0

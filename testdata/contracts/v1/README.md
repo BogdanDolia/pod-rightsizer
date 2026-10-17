@@ -31,6 +31,9 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/early-failure/` | Execution `failed` before Deployment discovery. `unreadReason` is `forbidden`. The document has the requested name and no UID, digest, owner, or pod. Load `executed` is false and termination is `not_started`. |
 | `valid/early-cancel/` | Execution `cancelled` before discovery. `unreadReason` is `cancelled_before_discovery`. Load termination is `context_canceled` and `executed` is false. |
 | `valid/early-not-found/` | Execution `failed` before discovery. `unreadReason` is `not_found`. Load `executed` is false and termination is `not_started`. |
+| `valid/early-timeout/` | Execution `failed` before the Deployment object was returned. `unreadReason` is `timeout`. The document has the requested name and no UID, generation, digest, owner, or pod. Load `executed` is false and termination is `not_started`. |
+| `valid/early-transport-error/` | Execution `failed` before discovery. `unreadReason` is `transport_error`. The synthetic case is connection refused. That symptom is not its own code. No UID, generation, digest, owner, or pod. |
+| `valid/early-api-server-5xx/` | Execution `failed` before discovery. `unreadReason` is `api_server_5xx`. The synthetic case is HTTP 503. The status number is not a separate field. No UID, generation, digest, owner, or pod. |
 | `valid/pods-empty/` | Execution `failed` after the Deployment read. `podList.discovery` is `empty`: ListPods succeeded and returned no pods. UID, generation, and image digest are kept. `replicas.observed` is 0 because that is the Deployment status. No pod UID, owner UID, or stability confirmation. Candidate is `not_tested` and export is `not_requested`. |
 | `valid/pods-list-failed/` | Execution `failed` after the Deployment read. `podList.discovery` is `not_obtained` with `unreadReason` `list_failed`. Status replica count stays 2. The empty `pods` array is not a census. |
 | `valid/pods-cancelled/` | Execution `cancelled` after the Deployment read and before ListPods returned. `unreadReason` is `cancelled_before_pods`. Load termination is `context_canceled` and `executed` is false. |
@@ -104,6 +107,7 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/read-without-owner.json` | observations | a read workload requires a non-empty owner chain |
 | `invalid/identity-stable-after-change.json` | observations | a changed image digest cannot set `identityStable` true |
 | `invalid/unread-with-window.json` | observations | an unread run cannot carry a metric window or a pod UID |
+| `invalid/unread-unknown-reason.json` | observations | `connection_refused` is not a closed `unreadReason` |
 | `invalid/partial-coverage-uid.json` | observations | partial discovery cannot invent a coverage pod UID |
 | `invalid/partial-empty-with-reason.json` | observations | a successful empty census cannot carry `unreadReason` |
 | `invalid/partial-identity-stable.json` | observations | partial discovery cannot set `identityStable` true |

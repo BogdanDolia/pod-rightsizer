@@ -25,7 +25,7 @@
     "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
     "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
     "workload": {
-      "description": "read is a completed discovery: Deployment identity, a non-empty owner chain, and at least one pod. partial is a successful Deployment read whose pod census is empty or was not returned. not_obtained is an early failure or cancellation before that Deployment read. partial keeps the UID, generation, and a digest only when one was read. not_obtained stores none of those. Neither partial nor not_obtained stores a pod UID, an owner UID, or a stability confirmation.",
+      "description": "read is a completed discovery: Deployment identity, a non-empty owner chain, and at least one pod. partial is a successful Deployment read whose pod census is empty or was not returned. not_obtained is an early failure or cancellation before that Deployment read, including a client timeout, a transport error, and an API server 5xx. partial keeps the UID, generation, and a digest only when one was read. not_obtained stores none of those. Neither partial nor not_obtained stores a pod UID, an owner UID, or a stability confirmation.",
       "oneOf": [
         { "$ref": "#/$defs/workloadRead" },
         { "$ref": "#/$defs/workloadPartial" },
@@ -661,7 +661,8 @@
       "properties": {
         "discovery": { "const": "not_obtained" },
         "unreadReason": {
-          "enum": ["forbidden", "not_found", "cancelled_before_discovery"]
+          "description": "Closed reason the Deployment object was not obtained. forbidden and not_found are Kubernetes status responses. cancelled_before_discovery is caller cancellation before that read. timeout is a client deadline. transport_error is a request that received no Kubernetes status, such as connection refused. api_server_5xx is an API server 5xx response, including 503. The value is not a free-form message.",
+          "enum": ["forbidden", "not_found", "cancelled_before_discovery", "timeout", "transport_error", "api_server_5xx"]
         },
         "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
         "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },

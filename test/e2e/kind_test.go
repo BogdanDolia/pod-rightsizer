@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
+	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
 )
 
 func TestKindResourcePatchDryRunDoesNotMutateDeployment(t *testing.T) {

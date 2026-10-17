@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	coremetrics "github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	coremetrics "github.com/HelixThinker/pod-rightsizer/pkg/metrics"
+	"github.com/HelixThinker/pod-rightsizer/pkg/recommender"
 )
 
 func TestEvaluateUsesIndependentEvidenceCount(t *testing.T) {

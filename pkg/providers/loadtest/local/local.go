@@ -3,8 +3,8 @@ package local
 import (
 	"context"
 
-	corelt "github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
-	providerlt "github.com/BogdanDolia/pod-rightsizer/pkg/providers/loadtest"
+	corelt "github.com/HelixThinker/pod-rightsizer/pkg/loadtest"
+	providerlt "github.com/HelixThinker/pod-rightsizer/pkg/providers/loadtest"
 )
 
 // Tester wraps the existing core load test implementation to satisfy the provider interface.

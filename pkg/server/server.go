@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BogdanDolia/pod-rightsizer/pkg/knowledge"
-	corek8s "github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
-	coreloadtest "github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
-	coremetrics "github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	"github.com/HelixThinker/pod-rightsizer/pkg/knowledge"
+	corek8s "github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
+	coreloadtest "github.com/HelixThinker/pod-rightsizer/pkg/loadtest"
+	coremetrics "github.com/HelixThinker/pod-rightsizer/pkg/metrics"
+	"github.com/HelixThinker/pod-rightsizer/pkg/recommender"
 	"github.com/google/uuid"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 )

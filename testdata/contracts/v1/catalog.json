@@ -203,6 +203,16 @@
       ]
     },
     {
+      "id": "invalid-load-not-started-with-interval",
+      "schema": "observations.schema.json",
+      "document": "invalid/load-not-started-with-interval.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/load/interval",
+        "got object, want null"
+      ]
+    },
+    {
       "id": "invalid-load-not-started-with-latency",
       "schema": "observations.schema.json",
       "document": "invalid/load-not-started-with-latency.json",
@@ -210,6 +220,20 @@
       "errorContains": [
         "/load/latency/p95Ns/state",
         "value must be 'missing_signal'"
+      ]
+    },
+    {
+      "id": "invalid-load-not-started-with-rates",
+      "schema": "observations.schema.json",
+      "document": "invalid/load-not-started-with-rates.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/load/actualRps",
+        "got number, want null",
+        "/load/httpErrorRate",
+        "got number, want null",
+        "/load/usefulThroughputRps",
+        "got number, want null"
       ]
     },
     {

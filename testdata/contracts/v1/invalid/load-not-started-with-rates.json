@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Observations",
+  "dataClass": "synthetic_fixture",
+  "runId": "66666666-6666-4666-8666-666666666666",
+  "workload": {
+    "discovery": "read",
+    "namespace": "rightsizer-synthetic",
+    "name": "orders-api",
+    "container": "api",
+    "deploymentUid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "deploymentGeneration": 7,
+    "podSelector": "app=orders",
+    "replicas": {
+      "desired": 2,
+      "observed": 2
+    },
+    "image": {
+      "reference": "example.invalid/orders-api:synthetic",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "stability": {
+      "deploymentUid": "unchanged",
+      "generation": "unchanged",
+      "imageDigest": "unchanged",
+      "containerRestarted": false,
+      "replicasFixed": true
+    }
+  },
+  "identityStable": true,
+  "ownerChain": [
+    {
+      "kind": "ReplicaSet",
+      "name": "orders-api-synthetic",
+      "uid": "aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa"
+    }
+  ],
+  "pods": [
+    {
+      "name": "orders-api-a",
+      "uid": "aaaaaaaa-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+      "ownerUid": "aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa",
+      "containerId": "containerd://synthetic-orders-api-a",
+      "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    },
+    {
+      "name": "orders-api-b",
+      "uid": "aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa",
+      "ownerUid": "aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa",
+      "containerId": "containerd://synthetic-orders-api-b",
+      "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    }
+  ],
+  "serviceMapping": {
+    "status": "verified",
+    "serviceName": "orders",
+    "routeProof": "endpoint_slice"
+  },
+  "autoscaler": {
+    "hpa": {
+      "discovery": "not_attempted",
+      "state": "unknown"
+    },
+    "vpa": {
+      "discovery": "not_attempted",
+      "state": "unknown"
+    }
+  },
+  "load": {
+    "executed": false,
+    "termination": "not_started",
+    "requests": 0,
+    "httpErrors": 0,
+    "actualRps": 1.2,
+    "httpErrorRate": 0.08,
+    "latency": {
+      "semantics": "not_applicable",
+      "p50Ns": {
+        "state": "missing_signal"
+      },
+      "p95Ns": {
+        "state": "missing_signal"
+      },
+      "p99Ns": {
+        "state": "missing_signal"
+      }
+    },
+    "usefulThroughputRps": 1.1,
+    "droppedIterations": null,
+    "generatorSaturated": null,
+    "interval": null
+  },
+  "windows": [],
+  "coverage": {
+    "expectedPodUids": [
+      "aaaaaaaa-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+      "aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa"
+    ],
+    "podsWithMetrics": [],
+    "complete": false,
+    "independentWindowCount": 0,
+    "discardedWindowCount": 0
+  }
+}

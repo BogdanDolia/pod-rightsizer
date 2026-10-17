@@ -128,6 +128,8 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/load-not-started-with-requests.json` | observations | `executed` false requires `requests` 0 |
 | `invalid/load-not-started-with-errors.json` | observations | `executed` false requires `httpErrors` 0 |
 | `invalid/load-not-started-with-latency.json` | observations | a load that did not start cannot report known latency |
+| `invalid/load-not-started-with-rates.json` | observations | zero requests keep `actualRps`, `httpErrorRate`, and `usefulThroughputRps` null |
+| `invalid/load-not-started-with-interval.json` | observations | a load that did not start keeps `interval` null |
 
 ## Checks left to later tasks
 

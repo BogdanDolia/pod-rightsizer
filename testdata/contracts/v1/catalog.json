@@ -336,6 +336,145 @@
       ]
     },
     {
+      "id": "invalid-partial-coverage-uid",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-coverage-uid.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/coverage/expectedPodUids",
+        "maxItems: got 1, want 0"
+      ]
+    },
+    {
+      "id": "invalid-partial-empty-with-reason",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-empty-with-reason.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload/podList",
+        "additional properties 'unreadReason' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-partial-identity-stable",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-identity-stable.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/identityStable",
+        "value must be false"
+      ]
+    },
+    {
+      "id": "invalid-partial-known-digest-missing",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-known-digest-missing.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload/image/digest",
+        "missing property 'value'"
+      ]
+    },
+    {
+      "id": "invalid-partial-missing-deployment-uid",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-missing-deployment-uid.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload",
+        "missing property 'deploymentUid'"
+      ]
+    },
+    {
+      "id": "invalid-partial-not-obtained-without-reason",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-not-obtained-without-reason.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload/podList",
+        "missing property 'unreadReason'"
+      ]
+    },
+    {
+      "id": "invalid-partial-pre-discovery-cancel-reason",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-pre-discovery-cancel-reason.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload/podList/unreadReason",
+        "cancelled_before_pods"
+      ]
+    },
+    {
+      "id": "invalid-partial-unknown-digest-with-value",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-unknown-digest-with-value.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload/image/digest",
+        "additional properties 'value' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-partial-verified-service",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-verified-service.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/serviceMapping/status",
+        "value must be 'unverified'"
+      ]
+    },
+    {
+      "id": "invalid-partial-with-owner",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-with-owner.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/ownerChain",
+        "maxItems: got 1, want 0"
+      ]
+    },
+    {
+      "id": "invalid-partial-with-pod",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-with-pod.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/pods",
+        "maxItems: got 1, want 0"
+      ]
+    },
+    {
+      "id": "invalid-partial-with-stability",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-with-stability.json",
+      "expect": "invalid",
+      "errorContains": [
+        "additional properties 'stability' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-partial-with-window",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-with-window.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/windows",
+        "maxItems: got 1, want 0"
+      ]
+    },
+    {
+      "id": "invalid-partial-zero-generation",
+      "schema": "observations.schema.json",
+      "document": "invalid/partial-zero-generation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload/deploymentGeneration",
+        "minimum: got 0, want 1"
+      ]
+    },
+    {
       "id": "invalid-read-missing-deployment-uid",
       "schema": "observations.schema.json",
       "document": "invalid/read-missing-deployment-uid.json",
@@ -985,6 +1124,84 @@
       "id": "valid-partial-settings-analysis",
       "schema": "analysis.schema.json",
       "document": "valid/partial-settings/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-cancelled-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/pods-cancelled/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-cancelled-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/pods-cancelled/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-cancelled-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/pods-cancelled/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-cancelled-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/pods-cancelled/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-digest-unknown-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/pods-digest-unknown/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-empty-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/pods-empty/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-empty-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/pods-empty/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-empty-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/pods-empty/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-empty-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/pods-empty/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-list-failed-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/pods-list-failed/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-list-failed-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/pods-list-failed/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-list-failed-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/pods-list-failed/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-pods-list-failed-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/pods-list-failed/run-spec.json",
       "expect": "valid"
     },
     {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Identity and metric evidence for one run. Source timestamps are not poll times. Overlapping windows stay in windows[] with disposition discarded; they are not new independent observations. discovery not_obtained stores no UID, digest, or pod. executed false stores no load measurements.",
+  "$comment": "Identity and metric evidence for one run. Source timestamps are not poll times. Overlapping windows stay in windows[] with disposition discarded; they are not new independent observations. discovery not_obtained stores no UID, digest, or pod. discovery partial stores the Deployment identity that was read and records the pod census separately. executed false stores no load measurements.",
   "title": "Observations",
   "type": "object",
   "additionalProperties": false,
@@ -25,17 +25,19 @@
     "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
     "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
     "workload": {
-      "description": "read is a resolved Deployment. not_obtained is an early failure or cancellation before that read. The two shapes do not share UID, digest, or pod fields.",
+      "description": "read is a completed discovery: Deployment identity, a non-empty owner chain, and at least one pod. partial is a successful Deployment read whose pod census is empty or was not returned. not_obtained is an early failure or cancellation before that Deployment read. partial keeps the UID, generation, and a digest only when one was read. not_obtained stores none of those. Neither partial nor not_obtained stores a pod UID, an owner UID, or a stability confirmation.",
       "oneOf": [
         { "$ref": "#/$defs/workloadRead" },
+        { "$ref": "#/$defs/workloadPartial" },
         { "$ref": "#/$defs/workloadUnread" }
       ]
     },
     "identityStable": {
-      "description": "True only when discovery is read and UID, generation, image, container restart, and replica count are all unchanged. False when any of those changed. Also false when discovery is not_obtained: unread identity is not a claim that the identity changed, and it is not by itself the evidence axis.",
+      "description": "True only when discovery is read and UID, generation, image, container restart, and replica count are all unchanged. False when any of those changed. Also false when discovery is not_obtained or partial: stability was not established. That false value is not a claim that the identity changed, and it is not by itself the evidence axis.",
       "type": "boolean"
     },
     "ownerChain": {
+      "description": "ReplicaSet owners of the measured pods. Non-empty only for discovery read. Empty on not_obtained and partial. On partial, empty is not a ReplicaSet census and is not a claim that no ReplicaSet exists.",
       "type": "array",
       "items": {
         "type": "object",
@@ -49,6 +51,7 @@
       }
     },
     "pods": {
+      "description": "Measured pods. Non-empty only for discovery read. Empty on not_obtained and partial. On partial, workload.podList.discovery says whether the empty array is a successful census or a list that was not returned.",
       "type": "array",
       "items": {
         "type": "object",
@@ -462,11 +465,45 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "workload": {
+            "properties": { "discovery": { "const": "partial" } },
+            "required": ["discovery"]
+          }
+        },
+        "required": ["workload"]
+      },
+      "then": {
+        "properties": {
+          "identityStable": { "const": false },
+          "ownerChain": { "maxItems": 0 },
+          "pods": { "maxItems": 0 },
+          "windows": { "maxItems": 0 },
+          "serviceMapping": {
+            "properties": {
+              "status": { "const": "unverified" },
+              "routeProof": { "const": "none" }
+            }
+          },
+          "coverage": {
+            "properties": {
+              "expectedPodUids": { "maxItems": 0 },
+              "podsWithMetrics": { "maxItems": 0 },
+              "complete": { "const": false },
+              "independentWindowCount": { "const": 0 },
+              "discardedWindowCount": { "const": 0 }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
     "workloadRead": {
-      "description": "Deployment identity after a successful read. Stability is within this run. A different Deployment UID on another run is allowed.",
+      "description": "Completed discovery. The Deployment was read and the pod census returned at least one pod. Stability is within this run. A different Deployment UID on another run is allowed.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -520,6 +557,101 @@
           }
         }
       }
+    },
+    "workloadPartial": {
+      "description": "Deployment identity after a successful read whose pod census is not a completed discovery. UID, generation, selector, and replica counts come from that Deployment object. An image digest is stored only when one was read. Pod UIDs, owner UIDs, and stability are not stored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery",
+        "namespace",
+        "name",
+        "container",
+        "deploymentUid",
+        "deploymentGeneration",
+        "podSelector",
+        "replicas",
+        "image",
+        "podList"
+      ],
+      "properties": {
+        "discovery": { "const": "partial" },
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+        "container": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "deploymentUid": { "$ref": "defs.schema.json#/$defs/uuid" },
+        "deploymentGeneration": {
+          "description": "metadata.generation from the Deployment read. Generation starts at 1. Zero is not an unread generation.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "podSelector": { "type": "string", "minLength": 1 },
+        "replicas": {
+          "description": "Counts from the Deployment object. desired is spec.replicas. observed is status.replicas. Zero is that spec or status value. It is not a substitute for a pod list that was not returned.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desired", "observed"],
+          "properties": {
+            "desired": { "type": "integer", "minimum": 0 },
+            "observed": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "image": {
+          "description": "reference is the container image on the Deployment template. digest is known only when the read included an OCI digest. unknown has no value. A tag is not a digest.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reference", "digest"],
+          "properties": {
+            "reference": { "type": "string", "minLength": 1 },
+            "digest": { "$ref": "#/$defs/imageDigestSignal" }
+          }
+        },
+        "podList": {
+          "description": "Pod census after the Deployment read. empty means ListPods succeeded and returned no pods. not_obtained means the list was not returned. A non-empty pod list is workload discovery read, not partial.",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["discovery"],
+              "properties": {
+                "discovery": { "const": "empty" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["discovery", "unreadReason"],
+              "properties": {
+                "discovery": { "const": "not_obtained" },
+                "unreadReason": {
+                  "description": "list_failed is an error from ListPods. cancelled_before_pods is a cancellation after the Deployment read and before that list returned. cancelled_before_discovery is not used here, because the Deployment was already read.",
+                  "enum": ["list_failed", "cancelled_before_pods"]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "imageDigestSignal": {
+      "description": "known carries the OCI digest that was read. unknown means the Deployment read did not include a digest. Unknown is not an empty string, a tag, or a fabricated sha256.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": { "$ref": "defs.schema.json#/$defs/imageDigest" }
+          }
+        }
+      ]
     },
     "workloadUnread": {
       "description": "Names the run asked to read. namespace, name, and container are the request, not observed identity. No UID, generation, digest, selector, or stability is stored, and zero is not used as a stand-in.",

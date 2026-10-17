@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Analysis",
+  "dataClass": "synthetic_fixture",
+  "runId": "b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1",
+  "calculationVersion": "recommender-core-1",
+  "policyVersion": "policy-core-1",
+  "execution": "failed",
+  "evidence": "invalid",
+  "target": "unverified",
+  "slo": "not_evaluated",
+  "source": "unverified",
+  "runtimeRules": "not_applicable",
+  "loadMode": "not_run",
+  "environmentRole": "staging",
+  "autoscalerGate": "unknown",
+  "candidate": {
+    "state": "not_tested"
+  },
+  "patch": {
+    "state": "not_requested",
+    "purpose": "none"
+  },
+  "gitopsExport": "not_requested",
+  "reasonCodes": [
+    "run_failed",
+    "evidence_invalid",
+    "target_unverified",
+    "source_unverified",
+    "autoscaler_unknown"
+  ],
+  "limitations": [],
+  "currentSettings": null,
+  "testedSettings": null,
+  "recommendation": null,
+  "evidenceConfidence": null,
+  "provenance": {
+    "tool": {
+      "name": "pod-rightsizer",
+      "version": "0.0.0-dev"
+    },
+    "metricsSource": "kubernetes-metrics-api",
+    "claimedInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hashMeaning": "content_immutability_not_measurement_truth"
+  },
+  "explanations": [],
+  "diagnostics": {
+    "available": true,
+    "message": "Synthetic stop after the Deployment read. ListPods succeeded and returned no pods. The Deployment UID, generation, and image digest are kept. No pod UID or owner UID was invented."
+  }
+}

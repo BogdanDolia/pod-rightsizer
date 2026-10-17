@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Manifest",
+  "dataClass": "synthetic_fixture",
+  "runId": "b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2",
+  "versions": {
+    "schema": "1.0.0",
+    "tool": "0.0.0-dev",
+    "build": "synthetic",
+    "policy": "policy-core-1",
+    "calculation": "recommender-core-1",
+    "profile": "g5-contract-1",
+    "rules": "nodejs-rules-0"
+  },
+  "outcome": {
+    "execution": "failed",
+    "evidence": "invalid",
+    "slo": "not_evaluated",
+    "patch": "not_requested",
+    "candidate": "not_tested"
+  },
+  "artifacts": [
+    {
+      "name": "run-spec.json",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "bytes": 128
+    },
+    {
+      "name": "analysis.json",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "bytes": 128
+    },
+    {
+      "name": "observations.json",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "bytes": 128
+    }
+  ],
+  "hashMeaning": "content_immutability_not_measurement_truth"
+}

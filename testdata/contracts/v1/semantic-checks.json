@@ -27,8 +27,15 @@
       "id": "identity-join",
       "owner": "T05",
       "executedBy": "none",
-      "statement": "After discovery read, observations.identityStable false must appear with analysis evidence invalid and identity_changed. discovery not_obtained also sets identityStable false and does not require identity_changed, because no UID was read. Deployment UID equality is required only inside one run.",
+      "statement": "After discovery read, observations.identityStable false must appear with analysis evidence invalid and identity_changed. discovery not_obtained and discovery partial also set identityStable false and do not require identity_changed. not_obtained has no UID. partial has a Deployment UID, but stability was not established, so false is not a change. Deployment UID equality is required only inside one run.",
       "example": "valid/identity-changed/analysis.json"
+    },
+    {
+      "id": "partial-discovery",
+      "owner": "T05",
+      "executedBy": "none",
+      "statement": "discovery partial stores the Deployment UID, generation, selector, and Deployment replica counts, and stores an image digest only when image.digest.state is known. podList.discovery empty is a successful empty pod census. podList.discovery not_obtained, with unreadReason list_failed or cancelled_before_pods, means the pod list was not returned. Neither case stores a pod UID, an owner UID, a stability object, or identityStable true. identityStable false on partial must not be joined to identity_changed. Partial discovery must not be joined to candidate state validated or gitopsExport ready. Completed discovery remains discovery read and still requires a non-empty owner chain and at least one pod.",
+      "example": "valid/pods-empty/observations.json"
     },
     {
       "id": "autoscaler-gate",
@@ -41,7 +48,7 @@
       "id": "export-gates",
       "owner": "T07",
       "executedBy": "none",
-      "statement": "gitopsExport ready requires a fresh identity recheck at export time. Replay and a prior dry_run_passed do not extend freshness.",
+      "statement": "gitopsExport ready requires a fresh identity recheck at export time and observations workload discovery read. Replay, a prior dry_run_passed, and discovery partial or not_obtained do not make an export ready.",
       "example": "valid/resource-candidate/analysis.json"
     },
     {
@@ -90,7 +97,7 @@
       "id": "candidate-link",
       "owner": "T15",
       "executedBy": "none",
-      "statement": "candidate validated requires comparisonId to a resource_candidate result whose ciVerdict is pass and whose run ids are the baseline and this run.",
+      "statement": "candidate validated requires comparisonId to a resource_candidate result whose ciVerdict is pass and whose run ids are the baseline and this run. It also requires observations workload discovery read. Partial and not_obtained discovery cannot validate a candidate.",
       "example": "valid/resource-candidate/analysis.json"
     },
     {

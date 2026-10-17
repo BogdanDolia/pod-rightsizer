@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Identity and metric evidence for one run. Source timestamps are not poll times. Overlapping windows stay in windows[] with disposition discarded; they are not new independent observations.",
+  "$comment": "Identity and metric evidence for one run. Source timestamps are not poll times. Overlapping windows stay in windows[] with disposition discarded; they are not new independent observations. discovery not_obtained stores no UID, digest, or pod. executed false stores no load measurements.",
   "title": "Observations",
   "type": "object",
   "additionalProperties": false,
@@ -25,66 +25,18 @@
     "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
     "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
     "workload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "namespace",
-        "name",
-        "container",
-        "deploymentUid",
-        "deploymentGeneration",
-        "podSelector",
-        "replicas",
-        "image",
-        "stability"
-      ],
-      "properties": {
-        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
-        "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
-        "container": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
-        "deploymentUid": { "$ref": "defs.schema.json#/$defs/uuid" },
-        "deploymentGeneration": { "type": "integer", "minimum": 1 },
-        "podSelector": { "type": "string", "minLength": 1 },
-        "replicas": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["desired", "observed"],
-          "properties": {
-            "desired": { "type": "integer", "minimum": 1 },
-            "observed": { "type": "integer", "minimum": 0 }
-          }
-        },
-        "image": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["reference", "digest"],
-          "properties": {
-            "reference": { "type": "string", "minLength": 1 },
-            "digest": { "$ref": "defs.schema.json#/$defs/imageDigest" }
-          }
-        },
-        "stability": {
-          "description": "Stability is within this run. A different Deployment UID on another run is allowed.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["deploymentUid", "generation", "imageDigest", "containerRestarted", "replicasFixed"],
-          "properties": {
-            "deploymentUid": { "enum": ["unchanged", "changed"] },
-            "generation": { "enum": ["unchanged", "changed"] },
-            "imageDigest": { "enum": ["unchanged", "changed"] },
-            "containerRestarted": { "type": "boolean" },
-            "replicasFixed": { "type": "boolean" }
-          }
-        }
-      }
+      "description": "read is a resolved Deployment. not_obtained is an early failure or cancellation before that read. The two shapes do not share UID, digest, or pod fields.",
+      "oneOf": [
+        { "$ref": "#/$defs/workloadRead" },
+        { "$ref": "#/$defs/workloadUnread" }
+      ]
     },
     "identityStable": {
-      "description": "False when UID, generation, image, a container restart, or replica count changed during this measurement. False makes the run unfit; it is not by itself the evidence axis.",
+      "description": "True only when discovery is read and UID, generation, image, container restart, and replica count are all unchanged. False when any of those changed. Also false when discovery is not_obtained: unread identity is not a claim that the identity changed, and it is not by itself the evidence axis.",
       "type": "boolean"
     },
     "ownerChain": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -98,7 +50,6 @@
     },
     "pods": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -299,6 +250,8 @@
           "then": {
             "properties": {
               "termination": { "enum": ["not_started", "context_canceled", "invalid_configuration", "invalid_target"] },
+              "requests": { "const": 0 },
+              "httpErrors": { "const": 0 },
               "interval": { "type": "null" }
             }
           }
@@ -456,6 +409,130 @@
         "required": ["workload"]
       },
       "then": { "properties": { "identityStable": { "const": true } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "workload": {
+            "properties": { "discovery": { "const": "read" } },
+            "required": ["discovery"]
+          }
+        },
+        "required": ["workload"]
+      },
+      "then": {
+        "properties": {
+          "ownerChain": { "minItems": 1 },
+          "pods": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "workload": {
+            "properties": { "discovery": { "const": "not_obtained" } },
+            "required": ["discovery"]
+          }
+        },
+        "required": ["workload"]
+      },
+      "then": {
+        "properties": {
+          "identityStable": { "const": false },
+          "ownerChain": { "maxItems": 0 },
+          "pods": { "maxItems": 0 },
+          "windows": { "maxItems": 0 },
+          "serviceMapping": {
+            "properties": {
+              "status": { "const": "unverified" },
+              "routeProof": { "const": "none" }
+            }
+          },
+          "coverage": {
+            "properties": {
+              "expectedPodUids": { "maxItems": 0 },
+              "podsWithMetrics": { "maxItems": 0 },
+              "complete": { "const": false },
+              "independentWindowCount": { "const": 0 },
+              "discardedWindowCount": { "const": 0 }
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "$defs": {
+    "workloadRead": {
+      "description": "Deployment identity after a successful read. Stability is within this run. A different Deployment UID on another run is allowed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery",
+        "namespace",
+        "name",
+        "container",
+        "deploymentUid",
+        "deploymentGeneration",
+        "podSelector",
+        "replicas",
+        "image",
+        "stability"
+      ],
+      "properties": {
+        "discovery": { "const": "read" },
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+        "container": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "deploymentUid": { "$ref": "defs.schema.json#/$defs/uuid" },
+        "deploymentGeneration": { "type": "integer", "minimum": 1 },
+        "podSelector": { "type": "string", "minLength": 1 },
+        "replicas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desired", "observed"],
+          "properties": {
+            "desired": { "type": "integer", "minimum": 1 },
+            "observed": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reference", "digest"],
+          "properties": {
+            "reference": { "type": "string", "minLength": 1 },
+            "digest": { "$ref": "defs.schema.json#/$defs/imageDigest" }
+          }
+        },
+        "stability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deploymentUid", "generation", "imageDigest", "containerRestarted", "replicasFixed"],
+          "properties": {
+            "deploymentUid": { "enum": ["unchanged", "changed"] },
+            "generation": { "enum": ["unchanged", "changed"] },
+            "imageDigest": { "enum": ["unchanged", "changed"] },
+            "containerRestarted": { "type": "boolean" },
+            "replicasFixed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "workloadUnread": {
+      "description": "Names the run asked to read. namespace, name, and container are the request, not observed identity. No UID, generation, digest, selector, or stability is stored, and zero is not used as a stand-in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovery", "unreadReason", "namespace", "name", "container"],
+      "properties": {
+        "discovery": { "const": "not_obtained" },
+        "unreadReason": {
+          "enum": ["forbidden", "not_found", "cancelled_before_discovery"]
+        },
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+        "container": { "$ref": "defs.schema.json#/$defs/k8sLabel" }
+      }
+    }
+  }
 }

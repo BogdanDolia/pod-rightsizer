@@ -97,12 +97,19 @@ Text display `%.0f` and patch `math.Ceil` can disagree in the legacy program. T0
 | Legacy patch YAML `cpu: null` | A serializer detail of `absent` in `resource-patch.yaml`. It is not stored as an analysis number and it is not unknown. |
 | Unknown limit | Not representable beside a recommendation. Unknown is a signal or discovery state, not a quantity of 0. |
 | Missing runtime signal | `state: missing_signal` and no numeric sibling. A known measurement may be 0. |
-| Load not executed or zero requests | `actualRps`, `httpErrorRate`, and `usefulThroughputRps` are JSON `null`. Latency states are `missing_signal`, not 0. |
+| Current CPU or memory request unset | `cpuRequest.state` or `memoryRequest.state` is `absent`. There is no number. `GetResourceSettings` returns 0 for a missing quantity; that 0 is not stored. |
+| Current request or limit not read | `state` is `unknown`. This is not `absent`. |
+| Recommendation beside current settings | Both current requests and both current limits are `absent` or `set`. `unknown` requires `recommendation` null. |
+| Absent request inside a comparison | `currentMilli` or `currentBytes` is 0. That 0 is the delta input only. |
+| CPU or memory limit comparison | `cpuLimit` accepts `cpuMilli` or `absent`. `memoryLimit` accepts `memoryBytes` or `absent`. |
+| Load not started | `executed` is false. `requests` and `httpErrors` are 0. `interval` is null. Termination is `not_started`, `context_canceled`, `invalid_configuration`, or `invalid_target`. |
+| Zero requests, including a load that did not start | `actualRps`, `httpErrorRate`, and `usefulThroughputRps` are JSON `null`. Latency states are `missing_signal`, not 0. |
+| Load started, then cancelled | `executed` stays true. Partial requests, rates, and latency may be recorded. |
 | Autoscaler not readable | `discovery` is `denied` or `not_attempted` and `state` is `unknown`. `absent` requires `discovery: read`. |
 | Source not confirmed | `SourceContext.status` is `unverified` or `declared`. It is not `verified`. |
 | Hash | Lowercase hex SHA-256 of presented bytes. `hashMeaning` is `content_immutability_not_measurement_truth`. |
 
-JSON `null` is never used as a synonym for unknown, for a missing signal, or for an absent limit.
+JSON `null` is never used as a synonym for unknown, for a missing signal, or for an absent limit. An unset current request is `absent`, not `unknown` and not the legacy 0. Recommendation requests and `testedSettings` requests stay positive. A comparison may use 0 as the numeric current side of an absent request; that does not make 0 the stored request.
 
 A package must not contain kubeconfig, tokens, authorization headers, a full environment, secret payloads, or hashes of secrets. Scenario auth and data fixtures use non-secret identifiers and `secretMaterial: excluded`. Unknown fixture conditions use `comparability: unknown`, which makes a comparison `not_comparable`. URLs reject userinfo.
 
@@ -137,9 +144,9 @@ Invariants the schema enforces when the triggering value is present:
 
 - Non-completed execution: recommendation and confidence are null, candidate is `not_tested`, patch is `not_requested`, export is `not_requested`, diagnostics is an object.
 - `cancelled`: SLO is `not_evaluated` and reason `cancelled` is present. `failed`: reason `run_failed` is present.
-- Evidence `insufficient` or `invalid`: no recommendation, no confidence, candidate `not_tested`, patch not requested, export not ready, plus `insufficient_data` or `evidence_invalid`.
+- Evidence `insufficient` or `invalid`: no recommendation, no confidence, candidate `not_tested` or `rejected`, patch not requested, export not ready, plus `insufficient_data` or `evidence_invalid`. `rejected` keeps `testedSettings` and the comparison ids. `validated` and ready export stay forbidden.
 - SLO `failed`: no recommendation, candidate is `not_tested` or `rejected`, patch not requested, reason `slo_failed`.
-- A recommendation object requires completed execution, valid evidence, a confidence object, current settings, at least one explanation, and either SLO `passed` or observe mode with SLO `not_evaluated`.
+- A recommendation object requires completed execution, valid evidence, a confidence object, current settings, at least one explanation, and either SLO `passed` or observe mode with SLO `not_evaluated`. Both current requests and both current limits on that object are `absent` or `set`.
 - A confidence object requires limitation `confidence_is_evidence_volume`.
 - Target `unverified` or `mismatch`, and source `mismatch`, block `validated` and ready export and require their reason codes.
 - Source `unverified` requires `source_unverified`, blocks ready export, and does not by itself remove a numeric recommendation.
@@ -178,7 +185,8 @@ Source context:
 
 Observations:
 
-- `identityStable` is true only when UID, generation, image digest, container restart, and replica count are all unchanged. Any of those changes makes the run's evidence invalid for MVP.
+- Workload `discovery` `read` requires the Deployment UID, generation, image digest, stability, a non-empty owner chain, and at least one pod. `discovery` `not_obtained` records `unreadReason` `forbidden`, `not_found`, or `cancelled_before_discovery`, plus the namespace, name, and container the run asked to read. It stores no UID, digest, owner, pod, or window. Service mapping on that document is `unverified` with `routeProof` `none`. Coverage pod lists are empty and `complete` is false. `identityStable` is false. That false value means stability was not observed. It does not mean the identity changed, and it does not by itself require reason `identity_changed`.
+- `identityStable` is true only when discovery is `read` and UID, generation, image digest, container restart, and replica count are all unchanged. Any of those changes makes the run's evidence invalid for MVP.
 - Service mapping is `verified` only with `routeProof: endpoint_slice`. `declared_only` and `none` are unverified.
 - A discarded window has a reason (`duplicate_poll`, `overlapping_window`, `outside_measured_interval`, `missing_pod`, `identity_changed`, `container_restart`, `conflicting_snapshot`). An accepted window has a null discard reason.
 - The schema does not recompute independent counts or the max-fold. That is T03 and T09.
@@ -254,7 +262,7 @@ Package file names, fixed: `run-spec.json`, `observations.json`, `analysis.json`
 
 Manifest requirements the schema can see as names, not as files on disk:
 
-- Always: `run-spec.json`, `analysis.json`, `observations.json`.
+- Always: `run-spec.json`, `analysis.json`, `observations.json`. A failed or cancelled run that never read the Deployment still includes `observations.json`. That file uses workload `discovery` `not_obtained`. It does not invent a UID, digest, or pod, and the manifest does not drop the file.
 - `execution: completed` also requires `runtime-findings.json`, `source-context.json`, and `report.md`.
 - Completed, valid evidence, and SLO `passed` also require `agent-brief.md`.
 - Patch `dry_run_passed` requires `resource-patch.yaml`. Any other patch state forbids that name.

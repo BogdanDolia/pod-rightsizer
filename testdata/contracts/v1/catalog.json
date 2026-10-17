@@ -11,6 +11,16 @@
       ]
     },
     {
+      "id": "invalid-absent-request-nonzero-comparison",
+      "schema": "analysis.schema.json",
+      "document": "invalid/absent-request-nonzero-comparison.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/cpuRequest/currentMilli",
+        "value must be 0"
+      ]
+    },
+    {
       "id": "invalid-autoscaler-denied-means-absent",
       "schema": "observations.schema.json",
       "document": "invalid/autoscaler-denied-means-absent.json",
@@ -71,6 +81,26 @@
       ]
     },
     {
+      "id": "invalid-cpu-limit-current-memory-bytes",
+      "schema": "analysis.schema.json",
+      "document": "invalid/cpu-limit-current-memory-bytes.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/cpuLimit/current",
+        "additional properties 'memoryBytes' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-cpu-limit-recommended-memory-bytes",
+      "schema": "analysis.schema.json",
+      "document": "invalid/cpu-limit-recommended-memory-bytes.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/cpuLimit/recommended",
+        "additional properties 'memoryBytes' not allowed"
+      ]
+    },
+    {
       "id": "invalid-cpu-quantity-string",
       "schema": "analysis.schema.json",
       "document": "invalid/cpu-quantity-string.json",
@@ -113,6 +143,36 @@
       ]
     },
     {
+      "id": "invalid-load-not-started-with-errors",
+      "schema": "observations.schema.json",
+      "document": "invalid/load-not-started-with-errors.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/load/httpErrors",
+        "value must be 0"
+      ]
+    },
+    {
+      "id": "invalid-load-not-started-with-latency",
+      "schema": "observations.schema.json",
+      "document": "invalid/load-not-started-with-latency.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/load/latency/p95Ns/state",
+        "value must be 'missing_signal'"
+      ]
+    },
+    {
+      "id": "invalid-load-not-started-with-requests",
+      "schema": "observations.schema.json",
+      "document": "invalid/load-not-started-with-requests.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/load/requests",
+        "value must be 0"
+      ]
+    },
+    {
       "id": "invalid-manifest-patch-without-dry-run",
       "schema": "manifest.schema.json",
       "document": "invalid/manifest-patch-without-dry-run.json",
@@ -120,6 +180,26 @@
       "errorContains": [
         "/artifacts",
         "'not' failed"
+      ]
+    },
+    {
+      "id": "invalid-memory-limit-current-cpu-milli",
+      "schema": "analysis.schema.json",
+      "document": "invalid/memory-limit-current-cpu-milli.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/memoryLimit/current",
+        "additional properties 'cpuMilli' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-memory-limit-recommended-cpu-milli",
+      "schema": "analysis.schema.json",
+      "document": "invalid/memory-limit-recommended-cpu-milli.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/memoryLimit/recommended",
+        "additional properties 'cpuMilli' not allowed"
       ]
     },
     {
@@ -142,6 +222,16 @@
       ]
     },
     {
+      "id": "invalid-negative-cpu-request",
+      "schema": "analysis.schema.json",
+      "document": "invalid/negative-cpu-request.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/cpuRequest/cpuMilli",
+        "minimum: got -5, want 1"
+      ]
+    },
+    {
       "id": "invalid-negative-memory",
       "schema": "analysis.schema.json",
       "document": "invalid/negative-memory.json",
@@ -152,6 +242,16 @@
       ]
     },
     {
+      "id": "invalid-negative-memory-request",
+      "schema": "analysis.schema.json",
+      "document": "invalid/negative-memory-request.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/memoryRequest/memoryBytes",
+        "minimum: got -1, want 1"
+      ]
+    },
+    {
       "id": "invalid-not-comparable-but-pass",
       "schema": "comparison-result.schema.json",
       "document": "invalid/not-comparable-but-pass.json",
@@ -159,6 +259,58 @@
       "errorContains": [
         "/ciVerdict",
         "value must be 'not_comparable'"
+      ]
+    },
+    {
+      "id": "invalid-read-missing-deployment-uid",
+      "schema": "observations.schema.json",
+      "document": "invalid/read-missing-deployment-uid.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload",
+        "missing property 'deploymentUid'"
+      ]
+    },
+    {
+      "id": "invalid-read-without-pods",
+      "schema": "observations.schema.json",
+      "document": "invalid/read-without-pods.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/pods",
+        "minItems: got 0, want 1"
+      ]
+    },
+    {
+      "id": "invalid-ready-export-insufficient-evidence",
+      "schema": "analysis.schema.json",
+      "document": "invalid/ready-export-insufficient-evidence.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/gitopsExport",
+        "not_requested",
+        "/evidence",
+        "value must be 'valid'"
+      ]
+    },
+    {
+      "id": "invalid-request-encoded-as-zero",
+      "schema": "analysis.schema.json",
+      "document": "invalid/request-encoded-as-zero.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/cpuRequest",
+        "got number, want object"
+      ]
+    },
+    {
+      "id": "invalid-request-set-to-zero",
+      "schema": "analysis.schema.json",
+      "document": "invalid/request-set-to-zero.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/cpuRequest/cpuMilli",
+        "minimum: got 0, want 1"
       ]
     },
     {
@@ -191,6 +343,16 @@
       ]
     },
     {
+      "id": "invalid-set-request-zero-comparison",
+      "schema": "analysis.schema.json",
+      "document": "invalid/set-request-zero-comparison.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/cpuRequest/currentMilli",
+        "minimum: got 0, want 1"
+      ]
+    },
+    {
       "id": "invalid-slo-failed-with-recommendation",
       "schema": "analysis.schema.json",
       "document": "invalid/slo-failed-with-recommendation.json",
@@ -208,6 +370,36 @@
       "errorContains": [
         "/findings/0/evaluation",
         "value must be 'evaluated'"
+      ]
+    },
+    {
+      "id": "invalid-tested-settings-zero-request",
+      "schema": "analysis.schema.json",
+      "document": "invalid/tested-settings-zero-request.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/testedSettings/cpuRequestMilli",
+        "minimum: got 0, want 1"
+      ]
+    },
+    {
+      "id": "invalid-unknown-cpu-limit-with-recommendation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-cpu-limit-with-recommendation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/cpuLimit/state",
+        "value must be one of 'absent', 'set'"
+      ]
+    },
+    {
+      "id": "invalid-unknown-cpu-request-with-recommendation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-cpu-request-with-recommendation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/cpuRequest/state",
+        "value must be one of 'absent', 'set'"
       ]
     },
     {
@@ -230,6 +422,16 @@
       ]
     },
     {
+      "id": "invalid-unknown-memory-limit-with-recommendation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-memory-limit-with-recommendation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/memoryLimit/state",
+        "value must be one of 'absent', 'set'"
+      ]
+    },
+    {
       "id": "invalid-unknown-minor-version",
       "schema": "analysis.schema.json",
       "document": "invalid/unknown-minor-version.json",
@@ -247,6 +449,70 @@
       "errorContains": [
         "/schemaVersion",
         "value must be '1.0.0'"
+      ]
+    },
+    {
+      "id": "invalid-unread-identity-stable",
+      "schema": "observations.schema.json",
+      "document": "invalid/unread-identity-stable.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/identityStable",
+        "value must be false"
+      ]
+    },
+    {
+      "id": "invalid-unread-service-verified",
+      "schema": "observations.schema.json",
+      "document": "invalid/unread-service-verified.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/serviceMapping/status",
+        "value must be 'unverified'"
+      ]
+    },
+    {
+      "id": "invalid-unread-with-deployment-uid",
+      "schema": "observations.schema.json",
+      "document": "invalid/unread-with-deployment-uid.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/workload",
+        "additional properties 'deploymentUid' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-unread-with-pod",
+      "schema": "observations.schema.json",
+      "document": "invalid/unread-with-pod.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/pods",
+        "maxItems: got 1, want 0"
+      ]
+    },
+    {
+      "id": "invalid-validated-with-insufficient-evidence",
+      "schema": "analysis.schema.json",
+      "document": "invalid/validated-with-insufficient-evidence.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/candidate/state",
+        "value must be one of 'not_tested', 'rejected'",
+        "/evidence",
+        "value must be 'valid'"
+      ]
+    },
+    {
+      "id": "invalid-validated-with-invalid-evidence",
+      "schema": "analysis.schema.json",
+      "document": "invalid/validated-with-invalid-evidence.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/candidate/state",
+        "value must be one of 'not_tested', 'rejected'",
+        "/evidence",
+        "value must be 'valid'"
       ]
     },
     {
@@ -436,6 +702,60 @@
       "expect": "valid"
     },
     {
+      "id": "valid-early-cancel-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/early-cancel/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-cancel-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/early-cancel/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-cancel-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/early-cancel/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-cancel-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/early-cancel/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-failure-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/early-failure/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-failure-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/early-failure/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-failure-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/early-failure/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-failure-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/early-failure/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-not-found-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/early-not-found/observations.json",
+      "expect": "valid"
+    },
+    {
       "id": "valid-failed-run-analysis",
       "schema": "analysis.schema.json",
       "document": "valid/failed-run/analysis.json",
@@ -484,6 +804,18 @@
       "expect": "valid"
     },
     {
+      "id": "valid-limit-transition-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/limit-transition/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-load-cancelled-partial-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/load-cancelled-partial/observations.json",
+      "expect": "valid"
+    },
+    {
       "id": "valid-observe-analysis",
       "schema": "analysis.schema.json",
       "document": "valid/observe/analysis.json",
@@ -493,6 +825,24 @@
       "id": "valid-observe-run-spec",
       "schema": "run-spec.schema.json",
       "document": "valid/observe/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-partial-settings-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/partial-settings/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-rejected-insufficient-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/rejected-insufficient/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-rejected-invalid-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/rejected-invalid/analysis.json",
       "expect": "valid"
     },
     {
@@ -529,6 +879,24 @@
       "id": "valid-report-only-source-context",
       "schema": "source-context.schema.json",
       "document": "valid/report-only/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-requests-both-absent-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/requests-both-absent/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-requests-cpu-absent-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/requests-cpu-absent/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-requests-memory-absent-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/requests-memory-absent/analysis.json",
       "expect": "valid"
     },
     {

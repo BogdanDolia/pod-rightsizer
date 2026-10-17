@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Observations",
+  "dataClass": "synthetic_fixture",
+  "runId": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+  "workload": {
+    "discovery": "not_obtained",
+    "unreadReason": "forbidden",
+    "namespace": "rightsizer-synthetic",
+    "name": "orders-api",
+    "container": "api",
+    "deploymentUid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  },
+  "identityStable": false,
+  "ownerChain": [],
+  "pods": [],
+  "serviceMapping": {
+    "status": "unverified",
+    "serviceName": "orders",
+    "routeProof": "none"
+  },
+  "autoscaler": {
+    "hpa": {
+      "discovery": "not_attempted",
+      "state": "unknown"
+    },
+    "vpa": {
+      "discovery": "not_attempted",
+      "state": "unknown"
+    }
+  },
+  "load": {
+    "executed": false,
+    "termination": "not_started",
+    "requests": 0,
+    "httpErrors": 0,
+    "actualRps": null,
+    "httpErrorRate": null,
+    "latency": {
+      "semantics": "not_applicable",
+      "p50Ns": {
+        "state": "missing_signal"
+      },
+      "p95Ns": {
+        "state": "missing_signal"
+      },
+      "p99Ns": {
+        "state": "missing_signal"
+      }
+    },
+    "usefulThroughputRps": null,
+    "droppedIterations": null,
+    "generatorSaturated": null,
+    "interval": null
+  },
+  "windows": [],
+  "coverage": {
+    "expectedPodUids": [],
+    "podsWithMetrics": [],
+    "complete": false,
+    "independentWindowCount": 0,
+    "discardedWindowCount": 0
+  }
+}

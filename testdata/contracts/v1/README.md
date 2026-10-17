@@ -27,7 +27,18 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/slo-failed/` | SLO `failed`, error ratio 0.08. Recommendation and confidence are null. No patch. |
 | `valid/insufficient/` | One independent window. Evidence `insufficient`. SLO can still be `passed`. No recommendation. |
 | `valid/cancelled/` | Execution `cancelled`, SLO `not_evaluated`, diagnostics present, load termination `context_canceled`. |
-| `valid/failed-run/` | Execution `failed`, evidence `invalid`, load `not_run`, autoscaler discovery not attempted so the gate is `unknown`. |
+| `valid/failed-run/` | Execution `failed`, evidence `invalid`, load `not_run`, autoscaler discovery not attempted so the gate is `unknown`. Workload identity was already read. |
+| `valid/early-failure/` | Execution `failed` before Deployment discovery. `unreadReason` is `forbidden`. The document has the requested name and no UID, digest, owner, or pod. Load `executed` is false and termination is `not_started`. |
+| `valid/early-cancel/` | Execution `cancelled` before discovery. `unreadReason` is `cancelled_before_discovery`. Load termination is `context_canceled` and `executed` is false. |
+| `valid/early-not-found/observations.json` | `unreadReason` `not_found`. The load did not start; termination is `invalid_target`. |
+| `valid/requests-both-absent/analysis.json` | Both current requests are `absent`. The recommendation remains. Comparison currents are 0. |
+| `valid/requests-cpu-absent/analysis.json` | CPU request `absent`, memory request `set`. |
+| `valid/requests-memory-absent/analysis.json` | Memory request `absent`, CPU request `set`. |
+| `valid/partial-settings/analysis.json` | No recommendation. CPU request and CPU limit are `unknown`. Memory request is `set`. Memory limit is `absent`. |
+| `valid/rejected-insufficient/analysis.json` | Candidate `rejected` after a completed test whose evidence is `insufficient`. `testedSettings` and comparison ids remain. Recommendation and confidence are null. Export is not ready. |
+| `valid/rejected-invalid/analysis.json` | Candidate `rejected` with evidence `invalid` and reason `identity_changed`. |
+| `valid/limit-transition/analysis.json` | CPU limit moves from `set` to `absent`. Memory limit moves from `absent` to `set`. |
+| `valid/load-cancelled-partial/observations.json` | The load started (`executed` true) and then ended with `context_canceled`. Requests, error rate, and known latency remain. |
 | `valid/identity-changed/` | Image digest changed inside the run. `identityStable` is false. Evidence `invalid` with `identity_changed`. |
 | `valid/observe/` | No load URL and no SLO. A recommendation is allowed only with limitation `observe_without_slo`. Candidate stays `not_tested`. |
 | `valid/autoscaler-unknown/` | HPA discovery `denied` is `unknown`, not absent. A recommendation may exist. Candidate validation is blocked. |
@@ -80,6 +91,32 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/manifest-patch-without-dry-run.json` | manifest | `resource-patch.yaml` is forbidden unless patch state is `dry_run_passed` |
 | `invalid/secret-field.json` | run spec | additional property `authorization` is rejected |
 | `invalid/code-regression-pass-without-noise-policy.json` | comparison result | `pass` requires budget `within_budget` |
+| `invalid/unread-identity-stable.json` | observations | unread discovery cannot set `identityStable` true |
+| `invalid/unread-with-deployment-uid.json` | observations | an unread workload cannot carry `deploymentUid` |
+| `invalid/unread-with-pod.json` | observations | an unread run cannot carry a pod |
+| `invalid/unread-service-verified.json` | observations | an unread run cannot claim a verified route |
+| `invalid/read-missing-deployment-uid.json` | observations | a read workload requires `deploymentUid` |
+| `invalid/read-without-pods.json` | observations | a read workload requires at least one pod |
+| `invalid/negative-cpu-request.json` | analysis | a set CPU request cannot be negative |
+| `invalid/negative-memory-request.json` | analysis | a set memory request cannot be negative |
+| `invalid/request-encoded-as-zero.json` | analysis | the number 0 is not an absent request |
+| `invalid/request-set-to-zero.json` | analysis | a set CPU request cannot be 0 |
+| `invalid/absent-request-nonzero-comparison.json` | analysis | an absent CPU request compares as `currentMilli` 0 |
+| `invalid/set-request-zero-comparison.json` | analysis | a set CPU request cannot compare as `currentMilli` 0 |
+| `invalid/tested-settings-zero-request.json` | analysis | `testedSettings` keeps a positive CPU request |
+| `invalid/unknown-cpu-request-with-recommendation.json` | analysis | `unknown` CPU request cannot sit beside a recommendation |
+| `invalid/unknown-cpu-limit-with-recommendation.json` | analysis | `unknown` CPU limit cannot sit beside a recommendation |
+| `invalid/unknown-memory-limit-with-recommendation.json` | analysis | `unknown` memory limit cannot sit beside a recommendation |
+| `invalid/validated-with-insufficient-evidence.json` | analysis | `validated` still requires evidence `valid` |
+| `invalid/validated-with-invalid-evidence.json` | analysis | `validated` still requires evidence `valid` |
+| `invalid/ready-export-insufficient-evidence.json` | analysis | ready export still requires evidence `valid` |
+| `invalid/cpu-limit-current-memory-bytes.json` | analysis | CPU limit `current` cannot use `memoryBytes` |
+| `invalid/cpu-limit-recommended-memory-bytes.json` | analysis | CPU limit `recommended` cannot use `memoryBytes` |
+| `invalid/memory-limit-current-cpu-milli.json` | analysis | memory limit `current` cannot use `cpuMilli` |
+| `invalid/memory-limit-recommended-cpu-milli.json` | analysis | memory limit `recommended` cannot use `cpuMilli` |
+| `invalid/load-not-started-with-requests.json` | observations | `executed` false requires `requests` 0 |
+| `invalid/load-not-started-with-errors.json` | observations | `executed` false requires `httpErrors` 0 |
+| `invalid/load-not-started-with-latency.json` | observations | a load that did not start cannot report known latency |
 
 ## Checks left to later tasks
 

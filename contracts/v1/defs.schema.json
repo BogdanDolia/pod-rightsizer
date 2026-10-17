@@ -342,14 +342,66 @@
         }
       ]
     },
+    "cpuRequestValue": {
+      "description": "A CPU request that was addressed by the reader. absent means the container spec has no CPU request: GetResourceSettings returns 0 cores for that, and this contract stores absent with no number. set is a positive millicore count. unknown means the request was not read. Zero and negative numbers are not states.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "cpuMilli"],
+          "properties": {
+            "state": { "const": "set" },
+            "cpuMilli": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        }
+      ]
+    },
+    "memoryRequestValue": {
+      "description": "A memory request in bytes when set. absent means the container spec has no memory request. unknown means the request was not read. Absence is not unknown and is not the number 0.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "memoryBytes"],
+          "properties": {
+            "state": { "const": "set" },
+            "memoryBytes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        }
+      ]
+    },
     "resourceSetting": {
-      "description": "Requests are always present when the setting is known. Limits use absent, set, or unknown.",
+      "description": "Current container resources after a read. Each request and limit is absent, set, or unknown. absent is a read with no quantity. unknown means that field was not read. Recommendation floors do not apply here.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["cpuRequestMilli", "memoryRequestBytes", "cpuLimit", "memoryLimit"],
+      "required": ["cpuRequest", "memoryRequest", "cpuLimit", "memoryLimit"],
       "properties": {
-        "cpuRequestMilli": { "type": "integer", "minimum": 1 },
-        "memoryRequestBytes": { "type": "integer", "minimum": 1 },
+        "cpuRequest": { "$ref": "#/$defs/cpuRequestValue" },
+        "memoryRequest": { "$ref": "#/$defs/memoryRequestValue" },
         "cpuLimit": { "$ref": "#/$defs/cpuLimitValue" },
         "memoryLimit": { "$ref": "#/$defs/memoryLimitValue" }
       }

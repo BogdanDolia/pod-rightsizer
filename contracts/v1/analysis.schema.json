@@ -69,7 +69,7 @@
       ]
     },
     "testedSettings": {
-      "description": "Settings that were deployed for a candidate run. They are not the recommendation calculated from that run.",
+      "description": "Settings that were deployed for a candidate run. They are not the recommendation calculated from that run. Requests stay positive integers. An absent or unknown current request is not stored in this object.",
       "oneOf": [
         { "type": "null" },
         {
@@ -228,8 +228,8 @@
         }
       ]
     },
-    "knownLimit": {
-      "description": "Limit used beside a recommendation. unknown is not allowed here.",
+    "knownCpuLimit": {
+      "description": "CPU limit whose only quantity is cpuMilli. absent has no number. unknown is not a value here.",
       "oneOf": [
         {
           "type": "object",
@@ -244,6 +244,26 @@
           "properties": {
             "state": { "const": "set" },
             "cpuMilli": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
+    "knownMemoryLimit": {
+      "description": "Memory limit whose only quantity is memoryBytes. absent has no number. unknown is not a value here.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "memoryBytes"],
+          "properties": {
+            "state": { "const": "set" },
+            "memoryBytes": { "type": "integer", "minimum": 1 }
           }
         }
       ]
@@ -293,8 +313,8 @@
           "properties": {
             "cpuRequest": { "$ref": "#/$defs/milliDelta" },
             "memoryRequest": { "$ref": "#/$defs/byteDelta" },
-            "cpuLimit": { "$ref": "#/$defs/limitDelta" },
-            "memoryLimit": { "$ref": "#/$defs/limitDelta" }
+            "cpuLimit": { "$ref": "#/$defs/cpuLimitDelta" },
+            "memoryLimit": { "$ref": "#/$defs/memoryLimitDelta" }
           }
         }
       },
@@ -387,67 +407,25 @@
         "direction": { "enum": ["increase", "decrease", "unchanged"] }
       }
     },
-    "limitDelta": {
+    "cpuLimitDelta": {
+      "description": "Comparison of CPU limits. Both sides use cpuMilli or absent. memoryBytes is not a value of this object.",
       "type": "object",
       "additionalProperties": false,
       "required": ["current", "recommended", "direction"],
       "properties": {
-        "current": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["state"],
-              "properties": { "state": { "const": "absent" } }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["state", "cpuMilli"],
-              "properties": {
-                "state": { "const": "set" },
-                "cpuMilli": { "type": "integer", "minimum": 1 }
-              }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["state", "memoryBytes"],
-              "properties": {
-                "state": { "const": "set" },
-                "memoryBytes": { "type": "integer", "minimum": 1 }
-              }
-            }
-          ]
-        },
-        "recommended": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["state"],
-              "properties": { "state": { "const": "absent" } }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["state", "cpuMilli"],
-              "properties": {
-                "state": { "const": "set" },
-                "cpuMilli": { "type": "integer", "minimum": 1 }
-              }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["state", "memoryBytes"],
-              "properties": {
-                "state": { "const": "set" },
-                "memoryBytes": { "type": "integer", "minimum": 1 }
-              }
-            }
-          ]
-        },
+        "current": { "$ref": "#/$defs/knownCpuLimit" },
+        "recommended": { "$ref": "#/$defs/knownCpuLimit" },
+        "direction": { "enum": ["increase", "decrease", "unchanged"] }
+      }
+    },
+    "memoryLimitDelta": {
+      "description": "Comparison of memory limits. Both sides use memoryBytes or absent. cpuMilli is not a value of this object.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "recommended", "direction"],
+      "properties": {
+        "current": { "$ref": "#/$defs/knownMemoryLimit" },
+        "recommended": { "$ref": "#/$defs/knownMemoryLimit" },
         "direction": { "enum": ["increase", "decrease", "unchanged"] }
       }
     }
@@ -511,7 +489,7 @@
         "properties": {
           "recommendation": { "type": "null" },
           "evidenceConfidence": { "type": "null" },
-          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "candidate": { "properties": { "state": { "enum": ["not_tested", "rejected"] } } },
           "patch": { "properties": { "state": { "const": "not_requested" } } },
           "gitopsExport": { "enum": ["not_requested", "blocked"] },
           "reasonCodes": { "contains": { "const": "insufficient_data" } }
@@ -527,7 +505,7 @@
         "properties": {
           "recommendation": { "type": "null" },
           "evidenceConfidence": { "type": "null" },
-          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "candidate": { "properties": { "state": { "enum": ["not_tested", "rejected"] } } },
           "patch": { "properties": { "state": { "const": "not_requested" } } },
           "gitopsExport": { "enum": ["not_requested", "blocked"] },
           "reasonCodes": { "contains": { "const": "evidence_invalid" } }
@@ -560,7 +538,32 @@
           "execution": { "const": "completed" },
           "evidence": { "const": "valid" },
           "evidenceConfidence": { "type": "object" },
-          "currentSettings": { "type": "object" },
+          "currentSettings": {
+            "type": "object",
+            "required": ["cpuRequest", "memoryRequest", "cpuLimit", "memoryLimit"],
+            "properties": {
+              "cpuRequest": {
+                "type": "object",
+                "properties": { "state": { "enum": ["absent", "set"] } },
+                "required": ["state"]
+              },
+              "memoryRequest": {
+                "type": "object",
+                "properties": { "state": { "enum": ["absent", "set"] } },
+                "required": ["state"]
+              },
+              "cpuLimit": {
+                "type": "object",
+                "properties": { "state": { "enum": ["absent", "set"] } },
+                "required": ["state"]
+              },
+              "memoryLimit": {
+                "type": "object",
+                "properties": { "state": { "enum": ["absent", "set"] } },
+                "required": ["state"]
+              }
+            }
+          },
           "explanations": { "minItems": 1 }
         },
         "anyOf": [
@@ -573,6 +576,130 @@
             "required": ["slo", "loadMode"]
           }
         ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recommendation": { "type": "object" },
+          "currentSettings": {
+            "properties": {
+              "cpuRequest": {
+                "type": "object",
+                "properties": { "state": { "const": "absent" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["cpuRequest"]
+          }
+        },
+        "required": ["recommendation", "currentSettings"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": {
+            "properties": {
+              "comparison": {
+                "properties": {
+                  "cpuRequest": { "properties": { "currentMilli": { "const": 0 } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recommendation": { "type": "object" },
+          "currentSettings": {
+            "properties": {
+              "cpuRequest": {
+                "type": "object",
+                "properties": { "state": { "const": "set" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["cpuRequest"]
+          }
+        },
+        "required": ["recommendation", "currentSettings"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": {
+            "properties": {
+              "comparison": {
+                "properties": {
+                  "cpuRequest": { "properties": { "currentMilli": { "minimum": 1 } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recommendation": { "type": "object" },
+          "currentSettings": {
+            "properties": {
+              "memoryRequest": {
+                "type": "object",
+                "properties": { "state": { "const": "absent" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["memoryRequest"]
+          }
+        },
+        "required": ["recommendation", "currentSettings"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": {
+            "properties": {
+              "comparison": {
+                "properties": {
+                  "memoryRequest": { "properties": { "currentBytes": { "const": 0 } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recommendation": { "type": "object" },
+          "currentSettings": {
+            "properties": {
+              "memoryRequest": {
+                "type": "object",
+                "properties": { "state": { "const": "set" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["memoryRequest"]
+          }
+        },
+        "required": ["recommendation", "currentSettings"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": {
+            "properties": {
+              "comparison": {
+                "properties": {
+                  "memoryRequest": { "properties": { "currentBytes": { "minimum": 1 } } }
+                }
+              }
+            }
+          }
+        }
       }
     },
     {

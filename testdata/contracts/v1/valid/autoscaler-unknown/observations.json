@@ -4,6 +4,7 @@
   "dataClass": "synthetic_fixture",
   "runId": "13131313-1313-4131-8131-131313131313",
   "workload": {
+    "discovery": "read",
     "namespace": "rightsizer-synthetic",
     "name": "orders-api",
     "container": "api",

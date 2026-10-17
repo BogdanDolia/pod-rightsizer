@@ -32,8 +32,14 @@
     "confidence_is_evidence_volume"
   ],
   "currentSettings": {
-    "cpuRequestMilli": 198,
-    "memoryRequestBytes": 182452224,
+    "cpuRequest": {
+      "state": "set",
+      "cpuMilli": 198
+    },
+    "memoryRequest": {
+      "state": "set",
+      "memoryBytes": 182452224
+    },
     "cpuLimit": {
       "state": "absent"
     },

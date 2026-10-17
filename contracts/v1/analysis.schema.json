@@ -79,7 +79,13 @@
           "properties": {
             "role": { "const": "resource_candidate_under_test" },
             "cpuRequestMilli": { "type": "integer", "minimum": 1 },
-            "memoryRequestBytes": { "$ref": "defs.schema.json#/$defs/roundedMemoryBytes" },
+            "memoryRequestBytes": {
+              "description": "Positive whole mebibytes deployed for the candidate. Zero is not an absent request.",
+              "allOf": [
+                { "$ref": "defs.schema.json#/$defs/roundedMemoryBytes" },
+                { "minimum": 1048576 }
+              ]
+            },
             "cpuLimit": { "$ref": "defs.schema.json#/$defs/recommendedCpuLimit" },
             "memoryLimit": { "$ref": "defs.schema.json#/$defs/recommendedMemoryLimit" }
           }
@@ -386,23 +392,29 @@
       ]
     },
     "milliDelta": {
+      "description": "CPU request comparison in millicores. currentMilli is 0 only for an absent current request. recommendedMilli is the recommendation and keeps the 10 millicore floor.",
       "type": "object",
       "additionalProperties": false,
       "required": ["currentMilli", "recommendedMilli", "deltaMilli", "direction"],
       "properties": {
         "currentMilli": { "type": "integer", "minimum": 0 },
-        "recommendedMilli": { "type": "integer", "minimum": 0 },
+        "recommendedMilli": { "type": "integer", "minimum": 10 },
         "deltaMilli": { "type": "integer" },
         "direction": { "enum": ["increase", "decrease", "unchanged"] }
       }
     },
     "byteDelta": {
+      "description": "Memory request comparison in bytes. currentBytes is 0 only for an absent current request. recommendedBytes is the recommendation: at least 32Mi and a whole number of mebibytes.",
       "type": "object",
       "additionalProperties": false,
       "required": ["currentBytes", "recommendedBytes", "deltaBytes", "direction"],
       "properties": {
         "currentBytes": { "type": "integer", "minimum": 0 },
-        "recommendedBytes": { "type": "integer", "minimum": 0 },
+        "recommendedBytes": {
+          "type": "integer",
+          "minimum": 33554432,
+          "multipleOf": 1048576
+        },
         "deltaBytes": { "type": "integer" },
         "direction": { "enum": ["increase", "decrease", "unchanged"] }
       }

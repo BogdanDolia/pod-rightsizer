@@ -11,6 +11,16 @@
       ]
     },
     {
+      "id": "invalid-absent-memory-request-nonzero-comparison",
+      "schema": "analysis.schema.json",
+      "document": "invalid/absent-memory-request-nonzero-comparison.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/memoryRequest/currentBytes",
+        "value must be 0"
+      ]
+    },
+    {
       "id": "invalid-absent-request-nonzero-comparison",
       "schema": "analysis.schema.json",
       "document": "invalid/absent-request-nonzero-comparison.json",
@@ -58,6 +68,16 @@
       "errorContains": [
         "/checkedConditions/resources",
         "value must be 'match'"
+      ]
+    },
+    {
+      "id": "invalid-comparison-recommended-cpu-zero",
+      "schema": "analysis.schema.json",
+      "document": "invalid/comparison-recommended-cpu-zero.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/cpuRequest/recommendedMilli",
+        "minimum: got 0, want 10"
       ]
     },
     {
@@ -363,6 +383,16 @@
       ]
     },
     {
+      "id": "invalid-set-memory-request-zero-comparison",
+      "schema": "analysis.schema.json",
+      "document": "invalid/set-memory-request-zero-comparison.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/comparison/memoryRequest/currentBytes",
+        "minimum: got 0, want 1"
+      ]
+    },
+    {
       "id": "invalid-set-request-zero-comparison",
       "schema": "analysis.schema.json",
       "document": "invalid/set-request-zero-comparison.json",
@@ -390,6 +420,16 @@
       "errorContains": [
         "/findings/0/evaluation",
         "value must be 'evaluated'"
+      ]
+    },
+    {
+      "id": "invalid-tested-settings-zero-memory",
+      "schema": "analysis.schema.json",
+      "document": "invalid/tested-settings-zero-memory.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/testedSettings/memoryRequestBytes",
+        "minimum: got 0"
       ]
     },
     {
@@ -448,6 +488,16 @@
       "expect": "invalid",
       "errorContains": [
         "/currentSettings/memoryLimit/state",
+        "value must be one of 'absent', 'set'"
+      ]
+    },
+    {
+      "id": "invalid-unknown-memory-request-with-recommendation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-memory-request-with-recommendation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/currentSettings/memoryRequest/state",
         "value must be one of 'absent', 'set'"
       ]
     },

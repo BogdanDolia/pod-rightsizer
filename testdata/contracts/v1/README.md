@@ -107,6 +107,11 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/absent-request-nonzero-comparison.json` | analysis | an absent CPU request compares as `currentMilli` 0 |
 | `invalid/set-request-zero-comparison.json` | analysis | a set CPU request cannot compare as `currentMilli` 0 |
 | `invalid/tested-settings-zero-request.json` | analysis | `testedSettings` keeps a positive CPU request |
+| `invalid/tested-settings-zero-memory.json` | analysis | `testedSettings` keeps a positive memory request |
+| `invalid/absent-memory-request-nonzero-comparison.json` | analysis | an absent memory request compares as `currentBytes` 0 |
+| `invalid/set-memory-request-zero-comparison.json` | analysis | a set memory request cannot compare as `currentBytes` 0 |
+| `invalid/unknown-memory-request-with-recommendation.json` | analysis | `unknown` memory request cannot sit beside a recommendation |
+| `invalid/comparison-recommended-cpu-zero.json` | analysis | the recommended CPU request keeps the 10 millicore floor |
 | `invalid/unknown-cpu-request-with-recommendation.json` | analysis | `unknown` CPU request cannot sit beside a recommendation |
 | `invalid/unknown-cpu-limit-with-recommendation.json` | analysis | `unknown` CPU limit cannot sit beside a recommendation |
 | `invalid/unknown-memory-limit-with-recommendation.json` | analysis | `unknown` memory limit cannot sit beside a recommendation |

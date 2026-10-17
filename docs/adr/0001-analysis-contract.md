@@ -100,7 +100,7 @@ Text display `%.0f` and patch `math.Ceil` can disagree in the legacy program. T0
 | Current CPU or memory request unset | `cpuRequest.state` or `memoryRequest.state` is `absent`. There is no number. `GetResourceSettings` returns 0 for a missing quantity; that 0 is not stored. |
 | Current request or limit not read | `state` is `unknown`. This is not `absent`. |
 | Recommendation beside current settings | Both current requests and both current limits are `absent` or `set`. `unknown` requires `recommendation` null. |
-| Absent request inside a comparison | `currentMilli` or `currentBytes` is 0. That 0 is the delta input only. |
+| Absent request inside a comparison | `currentMilli` or `currentBytes` is 0. That 0 is the delta input only. The recommended side keeps the recommendation floor: at least 10 millicores, or at least 32Mi on a mebibyte boundary. |
 | CPU or memory limit comparison | `cpuLimit` accepts `cpuMilli` or `absent`. `memoryLimit` accepts `memoryBytes` or `absent`. |
 | Load not started | `executed` is false. `requests` and `httpErrors` are 0. `interval` is null. Termination is `not_started`, `context_canceled`, `invalid_configuration`, or `invalid_target`. |
 | Zero requests, including a load that did not start | `actualRps`, `httpErrorRate`, and `usefulThroughputRps` are JSON `null`. Latency states are `missing_signal`, not 0. |
@@ -109,7 +109,7 @@ Text display `%.0f` and patch `math.Ceil` can disagree in the legacy program. T0
 | Source not confirmed | `SourceContext.status` is `unverified` or `declared`. It is not `verified`. |
 | Hash | Lowercase hex SHA-256 of presented bytes. `hashMeaning` is `content_immutability_not_measurement_truth`. |
 
-JSON `null` is never used as a synonym for unknown, for a missing signal, or for an absent limit. An unset current request is `absent`, not `unknown` and not the legacy 0. Recommendation requests and `testedSettings` requests stay positive. A comparison may use 0 as the numeric current side of an absent request; that does not make 0 the stored request.
+JSON `null` is never used as a synonym for unknown, for a missing signal, or for an absent limit. An unset current request is `absent`, not `unknown` and not the legacy 0. Recommendation requests stay at their floors. `testedSettings` requests stay positive: at least 1 millicore and at least 1 Mi. A comparison may use 0 as the numeric current side of an absent request; that does not make 0 the stored request or a recommended request.
 
 A package must not contain kubeconfig, tokens, authorization headers, a full environment, secret payloads, or hashes of secrets. Scenario auth and data fixtures use non-secret identifiers and `secretMaterial: excluded`. Unknown fixture conditions use `comparability: unknown`, which makes a comparison `not_comparable`. URLs reject userinfo.
 

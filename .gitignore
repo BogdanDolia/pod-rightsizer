@@ -28,3 +28,9 @@ resource-patch.yaml
 
 # OS files
 .DS_Store
+
+# Local analysis reports
+/docs/reports/
+
+# GoReleaser output
+/dist/

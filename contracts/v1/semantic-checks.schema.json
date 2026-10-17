@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Catalog of invariants that JSON Schema does not execute. executedBy is fixed to none so this file cannot claim those checks ran.",
+  "title": "SemanticCheckCatalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "checks"],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "SemanticCheckCatalog" },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "owner", "executedBy", "statement", "example"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "owner": {
+            "type": "string",
+            "pattern": "^T(0[3-9]|1[0-6])$"
+          },
+          "executedBy": { "const": "none" },
+          "statement": { "type": "string", "minLength": 1 },
+          "example": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

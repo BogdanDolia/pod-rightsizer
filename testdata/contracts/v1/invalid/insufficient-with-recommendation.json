@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Analysis",
+  "dataClass": "synthetic_fixture",
+  "runId": "a3a3a3a3-a3a3-43a3-83a3-a3a3a3a3a3a3",
+  "calculationVersion": "recommender-core-1",
+  "policyVersion": "policy-core-1",
+  "execution": "completed",
+  "evidence": "insufficient",
+  "target": "verified",
+  "slo": "passed",
+  "source": "verified",
+  "runtimeRules": "not_applicable",
+  "loadMode": "rps",
+  "environmentRole": "staging",
+  "autoscalerGate": "clear",
+  "candidate": {
+    "state": "rejected",
+    "baselineRunId": "88888888-8888-4888-8888-888888888888",
+    "candidateRunId": "a3a3a3a3-a3a3-43a3-83a3-a3a3a3a3a3a3",
+    "comparisonId": "b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1"
+  },
+  "patch": {
+    "state": "not_requested",
+    "purpose": "none"
+  },
+  "gitopsExport": "not_requested",
+  "reasonCodes": [
+    "insufficient_data",
+    "candidate_rejected"
+  ],
+  "limitations": [],
+  "currentSettings": {
+    "cpuRequest": {
+      "state": "set",
+      "cpuMilli": 100
+    },
+    "memoryRequest": {
+      "state": "set",
+      "memoryBytes": 134217728
+    },
+    "cpuLimit": {
+      "state": "absent"
+    },
+    "memoryLimit": {
+      "state": "set",
+      "memoryBytes": 268435456
+    }
+  },
+  "testedSettings": {
+    "role": "resource_candidate_under_test",
+    "cpuRequestMilli": 198,
+    "memoryRequestBytes": 182452224,
+    "cpuLimit": {
+      "state": "absent"
+    },
+    "memoryLimit": {
+      "state": "set",
+      "memoryBytes": 219152384
+    }
+  },
+  "recommendation": {},
+  "evidenceConfidence": null,
+  "provenance": {
+    "tool": {
+      "name": "pod-rightsizer",
+      "version": "0.0.0-dev"
+    },
+    "metricsSource": "kubernetes-metrics-api",
+    "claimedInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hashMeaning": "content_immutability_not_measurement_truth"
+  },
+  "explanations": [],
+  "diagnostics": null
+}

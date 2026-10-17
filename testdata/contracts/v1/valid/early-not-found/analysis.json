@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Analysis",
+  "dataClass": "synthetic_fixture",
+  "runId": "a9a9a9a9-a9a9-49a9-89a9-a9a9a9a9a9a9",
+  "calculationVersion": "recommender-core-1",
+  "policyVersion": "policy-core-1",
+  "execution": "failed",
+  "evidence": "invalid",
+  "target": "unverified",
+  "slo": "not_evaluated",
+  "source": "unverified",
+  "runtimeRules": "not_applicable",
+  "loadMode": "not_run",
+  "environmentRole": "staging",
+  "autoscalerGate": "unknown",
+  "candidate": {
+    "state": "not_tested"
+  },
+  "patch": {
+    "state": "not_requested",
+    "purpose": "none"
+  },
+  "gitopsExport": "not_requested",
+  "reasonCodes": [
+    "run_failed",
+    "evidence_invalid",
+    "target_unverified",
+    "source_unverified",
+    "autoscaler_unknown"
+  ],
+  "limitations": [],
+  "currentSettings": null,
+  "testedSettings": null,
+  "recommendation": null,
+  "evidenceConfidence": null,
+  "provenance": {
+    "tool": {
+      "name": "pod-rightsizer",
+      "version": "0.0.0-dev"
+    },
+    "metricsSource": "kubernetes-metrics-api",
+    "claimedInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hashMeaning": "content_immutability_not_measurement_truth"
+  },
+  "explanations": [],
+  "diagnostics": {
+    "available": true,
+    "message": "Synthetic NotFound before Deployment discovery. No UID, digest, or pod was invented."
+  }
+}

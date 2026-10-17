@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "ComparisonRequest",
+  "dataClass": "synthetic_fixture",
+  "comparisonId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "intent": "runtime_change",
+  "baseline": {
+    "runId": "11111111-1111-4111-8111-111111111111",
+    "manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "candidate": {
+    "runId": "77777777-7777-4777-8777-777777777777",
+    "manifestSha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  }
+}

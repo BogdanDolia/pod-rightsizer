@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "ComparisonRequest",
+  "dataClass": "synthetic_fixture",
+  "comparisonId": "17171717-1717-4171-8171-171717171717",
+  "intent": "resource_candidate",
+  "baseline": {
+    "runId": "88888888-8888-4888-8888-888888888888",
+    "manifestSha256": "8888888888888888888888888888888888888888888888888888888888888888"
+  },
+  "candidate": {
+    "runId": "15151515-1515-4151-8151-151515151515",
+    "manifestSha256": "abababababababababababababababababababababababababababababababab"
+  },
+  "declaredResourceChanges": [
+    "cpuRequest",
+    "memoryRequest",
+    "memoryLimit"
+  ]
+}

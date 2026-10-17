@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "RunSpec",
+  "dataClass": "synthetic_fixture",
+  "runId": "12121212-1212-4121-8121-121212121212",
+  "mode": "report_only",
+  "patchRequest": "not_requested",
+  "environment": {
+    "role": "staging",
+    "confirmation": "declared"
+  },
+  "workload": {
+    "namespace": "rightsizer-synthetic",
+    "kind": "Deployment",
+    "name": "orders-api",
+    "container": "api",
+    "logicalService": {
+      "name": "orders",
+      "mapping": "explicit"
+    },
+    "replicas": {
+      "desired": 2,
+      "fixedForExperiment": true
+    }
+  },
+  "load": {
+    "mode": "observe",
+    "requestedDurationNs": 300000000000
+  },
+  "target": {
+    "serviceName": "orders",
+    "namespace": "rightsizer-synthetic",
+    "url": null
+  },
+  "scenario": {
+    "id": "synthetic-observe",
+    "wrapper": {
+      "name": "none",
+      "version": "none"
+    },
+    "latencySemantics": "not_applicable",
+    "method": "NONE",
+    "phases": [
+      {
+        "name": "measured",
+        "durationNs": 300000000000,
+        "includedInMeasurement": true
+      }
+    ],
+    "authFixture": {
+      "id": "none",
+      "version": "none",
+      "secretMaterial": "excluded",
+      "comparability": "known"
+    },
+    "dataFixture": {
+      "id": "none",
+      "version": "none",
+      "secretMaterial": "excluded",
+      "comparability": "known"
+    }
+  },
+  "slo": null,
+  "policy": {
+    "version": "policy-core-1",
+    "cpuPercentile": 95,
+    "cpuRequestBufferPercent": 10,
+    "memoryBufferPercent": 20,
+    "cpuLimit": {
+      "mode": "none"
+    },
+    "memoryLimit": {
+      "mode": "request-multiplier",
+      "multiplier": 1.2
+    },
+    "minimumIndependentSamples": 3,
+    "pilot": {
+      "workloadKind": "Deployment",
+      "workloadShape": "http_api",
+      "candidateEnvironment": "staging",
+      "replicasMustRemainFixed": true,
+      "activeAutoscaler": "blocks_candidate",
+      "unknownAutoscaler": "blocks_candidate"
+    }
+  },
+  "runtime": {
+    "profileId": "nodejs",
+    "language": "typescript",
+    "framework": "express",
+    "workloadShape": "http_api",
+    "selection": "explicit",
+    "node": {
+      "support": {
+        "status": "pending_t02",
+        "line": null
+      }
+    }
+  }
+}

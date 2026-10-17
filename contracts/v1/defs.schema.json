@@ -1,0 +1,589 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Shared definitions for analysis contract v1. Document schemas reference this file with relative $ref only. The $schema URL identifies draft 2020-12 and is not fetched.",
+  "$defs": {
+    "schemaVersion": {
+      "description": "Exact schema release validated by contracts/v1. Unknown majors and minors fail this schema file; readers select a schema by exact version instead of ignoring unknown fields.",
+      "const": "1.0.0"
+    },
+    "dataClass": {
+      "description": "synthetic_fixture marks invented data. measured is reserved for a future collector. Neither value proves that a cluster object still exists.",
+      "enum": ["synthetic_fixture", "measured"]
+    },
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256 of presented bytes. It proves those bytes did not change. It does not prove the measurement, the cluster object, or a secret.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "imageDigest": {
+      "description": "OCI image digest. A tag or Git SHA is not a substitute.",
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "gitCommit": {
+      "description": "Full 40-character Git commit id. Presence is not verification that this commit built the measured image.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "dateTime": {
+      "description": "RFC 3339 timestamp with an explicit offset.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "k8sLabel": {
+      "description": "DNS-1123 label.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "k8sSubdomain": {
+      "description": "DNS-1123 subdomain used for Deployment names.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+    },
+    "reasonCode": {
+      "description": "Closed blocker and failure vocabulary shared by future CLI, API, and CI. Missing signals are limitations, not zeros and not this list.",
+      "enum": [
+        "insufficient_data",
+        "slo_failed",
+        "target_unverified",
+        "target_mismatch",
+        "identity_changed",
+        "source_unverified",
+        "source_mismatch",
+        "source_dirty",
+        "not_comparable",
+        "policy_blocked",
+        "patch_validation_failed",
+        "artifact_write_failed",
+        "cancelled",
+        "run_failed",
+        "autoscaler_unknown",
+        "autoscaler_present",
+        "candidate_rejected",
+        "freshness_expired",
+        "evidence_invalid",
+        "runtime_version_differs",
+        "runtime_settings_differ",
+        "condition_unknown"
+      ]
+    },
+    "limitationCode": {
+      "description": "Non-blocking caveat. It must not be read as a passed check.",
+      "enum": [
+        "missing_signal",
+        "source_declared_not_verified",
+        "observe_without_slo",
+        "experimental_patch_not_a_candidate_test",
+        "confidence_is_evidence_volume"
+      ]
+    },
+    "cpuMilli": {
+      "description": "Canonical CPU quantity in millicores. 1000 millicores = 1 core. This is not a Kubernetes quantity string.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "memoryBytes": {
+      "description": "Canonical memory quantity in bytes. 1 Mi = 1048576 bytes. Do not store mebibytes in this field.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "roundedMemoryBytes": {
+      "description": "Patch-rounded memory: whole mebibytes expressed as bytes. Rounding is ceil of recommender-core-1 Mi to the next mebibyte, then multiply by 1048576.",
+      "type": "integer",
+      "minimum": 0,
+      "multipleOf": 1048576
+    },
+    "durationNs": {
+      "description": "Canonical duration in nanoseconds. Go duration strings and milliseconds are legacy input or display units.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "errorRate": {
+      "description": "HTTP/transport error ratio from 0 to 1 inclusive. The legacy CLI flag and API field are percentages; divide those inputs by 100 before storing them here.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "httpUrl": {
+      "description": "http or https URL without userinfo, so a URL cannot carry an embedded secret.",
+      "type": "string",
+      "pattern": "^https?://[^@\\s]+$"
+    },
+    "execution": {
+      "description": "Whether the operation finished. completed does not mean the evidence, SLO, source, candidate, or patch is acceptable.",
+      "enum": ["completed", "failed", "cancelled"]
+    },
+    "evidenceState": {
+      "description": "Whether this measurement may feed the deterministic recommendation.",
+      "enum": ["valid", "insufficient", "invalid"]
+    },
+    "targetState": {
+      "description": "Whether measured pods and the load route belong to the selected workload.",
+      "enum": ["verified", "unverified", "mismatch"]
+    },
+    "sloState": {
+      "description": "Application result of the measured phase. not_evaluated is not a pass.",
+      "enum": ["passed", "failed", "not_evaluated"]
+    },
+    "sourceState": {
+      "description": "How the measured image relates to source. declared and unverified are not verified.",
+      "enum": ["verified", "declared", "unverified", "mismatch"]
+    },
+    "runtimeRulesState": {
+      "description": "Aggregate of profile rules. missing_signal means at least one applicable signal was unavailable. It does not mean the underlying problem is absent.",
+      "enum": ["evaluated", "missing_signal", "not_applicable"]
+    },
+    "candidateState": {
+      "description": "Whether these resource settings were exercised by a later comparable run. not_tested is the state before that run.",
+      "enum": ["not_tested", "validated", "rejected"]
+    },
+    "patchState": {
+      "description": "Kubernetes API/admission result for a strategic merge patch. dry_run_passed is not scheduling, SLO, apply, or production safety.",
+      "enum": ["not_requested", "dry_run_passed", "failed"]
+    },
+    "patchPurpose": {
+      "description": "experimental may exist before candidate validation. review is the GitOps export and requires a validated candidate.",
+      "enum": ["none", "experimental", "review"]
+    },
+    "gitopsExport": {
+      "description": "Ready only after candidate validation and a review dry-run. not_requested is not a failure.",
+      "enum": ["not_requested", "blocked", "ready"]
+    },
+    "autoscalerGate": {
+      "description": "clear means HPA and VPA were read and both are absent. unknown is not absence.",
+      "enum": ["clear", "present", "unknown"]
+    },
+    "environmentRole": {
+      "description": "Declared experiment environment. MVP candidate validation accepts only staging.",
+      "enum": ["staging", "unspecified"]
+    },
+    "loadMode": {
+      "description": "rps and concurrency match the legacy load tester. observe matches the API path with an empty target URL. not_run means the load phase did not start.",
+      "enum": ["rps", "concurrency", "observe", "not_run"]
+    },
+    "limitMode": {
+      "description": "Legacy recommender limit policy mode. none removes a limit; it is not unknown.",
+      "enum": ["none", "keep", "request-multiplier", "peak-multiplier"]
+    },
+    "limitPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/limitMode" },
+        "multiplier": {
+          "description": "Required only for multiplier modes. Omitted for none and keep. The legacy Go value 0 means unset and must be omitted here rather than stored as zero.",
+          "type": "number",
+          "minimum": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "enum": ["request-multiplier", "peak-multiplier"] } },
+            "required": ["mode"]
+          },
+          "then": { "required": ["multiplier"] }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "enum": ["none", "keep"] } },
+            "required": ["mode"]
+          },
+          "then": { "not": { "required": ["multiplier"] } }
+        }
+      ]
+    },
+    "policy": {
+      "description": "Inputs of recommender-core-1 plus the MVP pilot gates. Numeric safety percentages are not part of this object.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "cpuPercentile",
+        "cpuRequestBufferPercent",
+        "memoryBufferPercent",
+        "cpuLimit",
+        "memoryLimit",
+        "minimumIndependentSamples",
+        "pilot"
+      ],
+      "properties": {
+        "version": { "const": "policy-core-1" },
+        "cpuPercentile": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+        "cpuRequestBufferPercent": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "memoryBufferPercent": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "cpuLimit": { "$ref": "#/$defs/limitPolicy" },
+        "memoryLimit": { "$ref": "#/$defs/limitPolicy" },
+        "minimumIndependentSamples": { "type": "integer", "minimum": 2 },
+        "pilot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workloadKind",
+            "workloadShape",
+            "candidateEnvironment",
+            "replicasMustRemainFixed",
+            "activeAutoscaler",
+            "unknownAutoscaler"
+          ],
+          "properties": {
+            "workloadKind": { "const": "Deployment" },
+            "workloadShape": { "const": "http_api" },
+            "candidateEnvironment": { "const": "staging" },
+            "replicasMustRemainFixed": { "const": true },
+            "activeAutoscaler": { "const": "blocks_candidate" },
+            "unknownAutoscaler": { "const": "blocks_candidate" }
+          }
+        }
+      }
+    },
+    "cpuLimitValue": {
+      "description": "A CPU limit. absent means the limit is unset. Zero is not a third state and must not be used for unknown.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "cpuMilli"],
+          "properties": {
+            "state": { "const": "set" },
+            "cpuMilli": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        }
+      ]
+    },
+    "memoryLimitValue": {
+      "description": "A memory limit in bytes when set. absent means unset. unknown means the field was not read.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "memoryBytes"],
+          "properties": {
+            "state": { "const": "set" },
+            "memoryBytes": { "$ref": "#/$defs/memoryBytes" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        }
+      ]
+    },
+    "recommendedCpuLimit": {
+      "description": "recommender-core-1 CPU limit after floors. absent is the legacy zero limit and is rendered as YAML null only in the patch serializer.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "cpuMilli"],
+          "properties": {
+            "state": { "const": "set" },
+            "cpuMilli": { "type": "integer", "minimum": 50 }
+          }
+        }
+      ]
+    },
+    "recommendedMemoryLimit": {
+      "description": "recommender-core-1 memory limit after the 64Mi floor and mebibyte rounding.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "memoryBytes"],
+          "properties": {
+            "state": { "const": "set" },
+            "memoryBytes": {
+              "type": "integer",
+              "minimum": 67108864,
+              "multipleOf": 1048576
+            }
+          }
+        }
+      ]
+    },
+    "cpuRequestValue": {
+      "description": "A CPU request that was addressed by the reader. absent means the container spec has no CPU request: GetResourceSettings returns 0 cores for that, and this contract stores absent with no number. set is a positive millicore count. unknown means the request was not read. Zero and negative numbers are not states.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "cpuMilli"],
+          "properties": {
+            "state": { "const": "set" },
+            "cpuMilli": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        }
+      ]
+    },
+    "memoryRequestValue": {
+      "description": "A memory request in bytes when set. absent means the container spec has no memory request. unknown means the request was not read. Absence is not unknown and is not the number 0.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "memoryBytes"],
+          "properties": {
+            "state": { "const": "set" },
+            "memoryBytes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        }
+      ]
+    },
+    "resourceSetting": {
+      "description": "Current container resources after a read. Each request and limit is absent, set, or unknown. absent is a read with no quantity. unknown means that field was not read. Recommendation floors do not apply here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpuRequest", "memoryRequest", "cpuLimit", "memoryLimit"],
+      "properties": {
+        "cpuRequest": { "$ref": "#/$defs/cpuRequestValue" },
+        "memoryRequest": { "$ref": "#/$defs/memoryRequestValue" },
+        "cpuLimit": { "$ref": "#/$defs/cpuLimitValue" },
+        "memoryLimit": { "$ref": "#/$defs/memoryLimitValue" }
+      }
+    },
+    "evidenceConfidence": {
+      "description": "Legacy confidence: 80 percent independent windows toward 30 and 20 percent duration toward 30 minutes. This is evidence volume, not P(safe) and not an AI cause confidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["meaning", "level", "score", "independentSamples", "observationSeconds", "reasons"],
+      "properties": {
+        "meaning": { "const": "evidence_volume" },
+        "level": { "enum": ["low", "medium", "high"] },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "independentSamples": { "type": "integer", "minimum": 0 },
+        "observationSeconds": { "type": "number", "minimum": 0 },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "level": { "const": "high" } },
+            "required": ["level"]
+          },
+          "then": { "properties": { "score": { "minimum": 0.8 } } }
+        },
+        {
+          "if": {
+            "properties": { "level": { "const": "medium" } },
+            "required": ["level"]
+          },
+          "then": { "properties": { "score": { "minimum": 0.45, "exclusiveMaximum": 0.8 } } }
+        },
+        {
+          "if": {
+            "properties": { "level": { "const": "low" } },
+            "required": ["level"]
+          },
+          "then": { "properties": { "score": { "exclusiveMaximum": 0.45 } } }
+        }
+      ]
+    },
+    "autoscalerController": {
+      "description": "denied or not_attempted discovery is unknown, never absent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovery", "state"],
+      "properties": {
+        "discovery": { "enum": ["read", "denied", "not_attempted"] },
+        "state": { "enum": ["absent", "present", "unknown"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "discovery": { "enum": ["denied", "not_attempted"] } },
+            "required": ["discovery"]
+          },
+          "then": { "properties": { "state": { "const": "unknown" } } }
+        },
+        {
+          "if": {
+            "properties": { "state": { "enum": ["absent", "present"] } },
+            "required": ["state"]
+          },
+          "then": { "properties": { "discovery": { "const": "read" } } }
+        }
+      ]
+    },
+    "byteSignal": {
+      "description": "known may be zero when a real measurement is zero. missing_signal has no number.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "missing_signal" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "bytes"],
+          "properties": {
+            "state": { "const": "known" },
+            "bytes": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "durationSignal": {
+      "description": "known nanoseconds may be zero for a real measurement. missing_signal must not encode that gap as zero.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "missing_signal" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "nanoseconds"],
+          "properties": {
+            "state": { "const": "known" },
+            "nanoseconds": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "nodeVersion": {
+      "description": "Observed Node.js version of the measured process. unknown is not version 0 and is not the supported LTS pin.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "unknown" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "version"],
+          "properties": {
+            "state": { "const": "known" },
+            "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+          }
+        }
+      ]
+    },
+    "fixtureRef": {
+      "description": "Non-secret identifier of an auth or data fixture. Do not store the secret or its hash.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "secretMaterial", "comparability"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "secretMaterial": { "const": "excluded" },
+        "comparability": {
+          "description": "unknown means a later comparison must be not_comparable rather than assumed equal.",
+          "enum": ["known", "unknown"]
+        }
+      }
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "durationNs", "includedInMeasurement"],
+      "properties": {
+        "name": { "enum": ["warmup", "measured", "cooldown"] },
+        "durationNs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 86400000000000
+        },
+        "includedInMeasurement": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "name": { "const": "measured" } },
+            "required": ["name"]
+          },
+          "then": { "properties": { "includedInMeasurement": { "const": true } } }
+        },
+        {
+          "if": {
+            "properties": { "name": { "enum": ["warmup", "cooldown"] } },
+            "required": ["name"]
+          },
+          "then": { "properties": { "includedInMeasurement": { "const": false } } }
+        }
+      ]
+    },
+    "conditionCheck": {
+      "description": "match and differ are claims about a known value. unknown forces not_comparable for a material condition.",
+      "enum": ["match", "differ", "unknown"]
+    },
+    "hashMeaning": {
+      "const": "content_immutability_not_measurement_truth"
+    }
+  }
+}

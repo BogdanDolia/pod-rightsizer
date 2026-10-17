@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Analysis",
+  "dataClass": "synthetic_fixture",
+  "runId": "b3b3b3b3-b3b3-43b3-83b3-b3b3b3b3b3b3",
+  "calculationVersion": "recommender-core-1",
+  "policyVersion": "policy-core-1",
+  "execution": "cancelled",
+  "evidence": "insufficient",
+  "target": "unverified",
+  "slo": "not_evaluated",
+  "source": "unverified",
+  "runtimeRules": "not_applicable",
+  "loadMode": "not_run",
+  "environmentRole": "staging",
+  "autoscalerGate": "unknown",
+  "candidate": {
+    "state": "not_tested"
+  },
+  "patch": {
+    "state": "not_requested",
+    "purpose": "none"
+  },
+  "gitopsExport": "not_requested",
+  "reasonCodes": [
+    "cancelled",
+    "insufficient_data",
+    "target_unverified",
+    "source_unverified",
+    "autoscaler_unknown"
+  ],
+  "limitations": [],
+  "currentSettings": null,
+  "testedSettings": null,
+  "recommendation": null,
+  "evidenceConfidence": null,
+  "provenance": {
+    "tool": {
+      "name": "pod-rightsizer",
+      "version": "0.0.0-dev"
+    },
+    "metricsSource": "kubernetes-metrics-api",
+    "claimedInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hashMeaning": "content_immutability_not_measurement_truth"
+  },
+  "explanations": [],
+  "diagnostics": {
+    "available": true,
+    "message": "Synthetic cancellation after the Deployment read and before ListPods returned. The Deployment UID, generation, and image digest are kept. No pod UID was invented."
+  }
+}

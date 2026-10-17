@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "T14 result shape. Comparable does not assign a noise percentage. code_regression cannot pass without a versioned noise policy. Unknown material conditions are not_comparable.",
+  "title": "ComparisonResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "dataClass",
+    "comparisonId",
+    "intent",
+    "baseline",
+    "candidate",
+    "comparability",
+    "reasonCodes",
+    "checkedConditions",
+    "deltas",
+    "budget",
+    "baselineSlo",
+    "candidateSlo",
+    "ciVerdict"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "ComparisonResult" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "comparisonId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "intent": { "enum": ["code_regression", "resource_candidate"] },
+    "baseline": { "$ref": "#/$defs/runRef" },
+    "candidate": { "$ref": "#/$defs/runRef" },
+    "comparability": { "enum": ["comparable", "not_comparable"] },
+    "reasonCodes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "defs.schema.json#/$defs/reasonCode" }
+    },
+    "declaredResourceChanges": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["cpuRequest", "cpuLimit", "memoryRequest", "memoryLimit"] }
+    },
+    "checkedConditions": { "$ref": "#/$defs/conditions" },
+    "deltas": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/deltas" }
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "noisePolicyVersion"],
+      "properties": {
+        "outcome": { "enum": ["not_evaluated", "within_budget", "exceeded"] },
+        "noisePolicyVersion": {
+          "description": "Null until T14/T18 record a versioned noise policy. A null policy cannot produce a green code_regression verdict.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "const": "not_evaluated" } },
+            "required": ["outcome"]
+          },
+          "then": { "properties": { "noisePolicyVersion": { "type": "null" } } }
+        },
+        {
+          "if": {
+            "properties": { "outcome": { "enum": ["within_budget", "exceeded"] } },
+            "required": ["outcome"]
+          },
+          "then": { "properties": { "noisePolicyVersion": { "type": "string" } } }
+        }
+      ]
+    },
+    "baselineSlo": { "$ref": "defs.schema.json#/$defs/sloState" },
+    "candidateSlo": { "$ref": "defs.schema.json#/$defs/sloState" },
+    "ciVerdict": { "enum": ["pass", "fail", "inconclusive", "not_comparable"] }
+  },
+  "$defs": {
+    "runRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "manifestSha256"],
+      "properties": {
+        "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+        "manifestSha256": { "$ref": "defs.schema.json#/$defs/sha256" }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logicalService",
+        "scenario",
+        "loadShape",
+        "resources",
+        "replicas",
+        "runtimeSettings",
+        "runtimeVersion",
+        "profile",
+        "policy",
+        "nodeClass",
+        "imageDigest",
+        "sourceRevision",
+        "deploymentUid",
+        "deploymentGeneration",
+        "authFixture",
+        "dataFixture",
+        "latencySemantics",
+        "environmentRole"
+      ],
+      "properties": {
+        "logicalService": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "scenario": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "loadShape": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "resources": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "replicas": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "runtimeSettings": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "runtimeVersion": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "profile": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "policy": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "nodeClass": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "imageDigest": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "sourceRevision": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "deploymentUid": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "deploymentGeneration": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "authFixture": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "dataFixture": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "latencySemantics": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "environmentRole": { "$ref": "defs.schema.json#/$defs/conditionCheck" }
+      }
+    },
+    "deltas": {
+      "description": "Candidate minus baseline. Present only when comparability is comparable. Signs are not a budget decision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpuPeakMilli", "memoryHighWaterBytes", "p95LatencyNs", "httpErrorRate", "usefulThroughputRps"],
+      "properties": {
+        "cpuPeakMilli": { "type": "integer" },
+        "memoryHighWaterBytes": { "type": "integer" },
+        "p95LatencyNs": { "type": "integer" },
+        "httpErrorRate": { "type": "number" },
+        "usefulThroughputRps": { "type": "number" }
+      }
+    },
+    "materialUnknown": {
+      "anyOf": [
+        { "properties": { "logicalService": { "const": "unknown" } }, "required": ["logicalService"] },
+        { "properties": { "scenario": { "const": "unknown" } }, "required": ["scenario"] },
+        { "properties": { "loadShape": { "const": "unknown" } }, "required": ["loadShape"] },
+        { "properties": { "resources": { "const": "unknown" } }, "required": ["resources"] },
+        { "properties": { "replicas": { "const": "unknown" } }, "required": ["replicas"] },
+        { "properties": { "runtimeSettings": { "const": "unknown" } }, "required": ["runtimeSettings"] },
+        { "properties": { "runtimeVersion": { "const": "unknown" } }, "required": ["runtimeVersion"] },
+        { "properties": { "profile": { "const": "unknown" } }, "required": ["profile"] },
+        { "properties": { "policy": { "const": "unknown" } }, "required": ["policy"] },
+        { "properties": { "nodeClass": { "const": "unknown" } }, "required": ["nodeClass"] },
+        { "properties": { "imageDigest": { "const": "unknown" } }, "required": ["imageDigest"] },
+        { "properties": { "sourceRevision": { "const": "unknown" } }, "required": ["sourceRevision"] },
+        { "properties": { "authFixture": { "const": "unknown" } }, "required": ["authFixture"] },
+        { "properties": { "dataFixture": { "const": "unknown" } }, "required": ["dataFixture"] },
+        { "properties": { "latencySemantics": { "const": "unknown" } }, "required": ["latencySemantics"] },
+        { "properties": { "environmentRole": { "const": "unknown" } }, "required": ["environmentRole"] },
+        { "properties": { "deploymentUid": { "const": "unknown" } }, "required": ["deploymentUid"] },
+        { "properties": { "deploymentGeneration": { "const": "unknown" } }, "required": ["deploymentGeneration"] }
+      ]
+    },
+    "sharedMatch": {
+      "type": "object",
+      "properties": {
+        "logicalService": { "const": "match" },
+        "scenario": { "const": "match" },
+        "loadShape": { "const": "match" },
+        "replicas": { "const": "match" },
+        "runtimeSettings": { "const": "match" },
+        "runtimeVersion": { "const": "match" },
+        "profile": { "const": "match" },
+        "policy": { "const": "match" },
+        "nodeClass": { "const": "match" },
+        "authFixture": { "const": "match" },
+        "dataFixture": { "const": "match" },
+        "latencySemantics": { "const": "match" },
+        "environmentRole": { "const": "match" },
+        "deploymentUid": { "enum": ["match", "differ"] },
+        "deploymentGeneration": { "enum": ["match", "differ"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "intent": { "const": "resource_candidate" } },
+        "required": ["intent"]
+      },
+      "then": { "required": ["declaredResourceChanges"] }
+    },
+    {
+      "if": {
+        "properties": { "intent": { "const": "code_regression" } },
+        "required": ["intent"]
+      },
+      "then": { "not": { "required": ["declaredResourceChanges"] } }
+    },
+    {
+      "if": {
+        "properties": { "checkedConditions": { "$ref": "#/$defs/materialUnknown" } },
+        "required": ["checkedConditions"]
+      },
+      "then": { "properties": { "comparability": { "const": "not_comparable" } } }
+    },
+    {
+      "if": {
+        "properties": { "comparability": { "const": "not_comparable" } },
+        "required": ["comparability"]
+      },
+      "then": {
+        "properties": {
+          "deltas": { "type": "null" },
+          "budget": { "properties": { "outcome": { "const": "not_evaluated" } } },
+          "ciVerdict": { "const": "not_comparable" },
+          "reasonCodes": {
+            "contains": { "const": "not_comparable" },
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "code_regression" },
+          "comparability": { "const": "comparable" }
+        },
+        "required": ["intent", "comparability"]
+      },
+      "then": {
+        "properties": {
+          "checkedConditions": {
+            "allOf": [
+              { "$ref": "#/$defs/sharedMatch" },
+              {
+                "properties": {
+                  "resources": { "const": "match" },
+                  "imageDigest": { "enum": ["match", "differ"] },
+                  "sourceRevision": { "enum": ["match", "differ"] }
+                }
+              }
+            ]
+          },
+          "deltas": { "type": "object" },
+          "ciVerdict": { "enum": ["pass", "fail", "inconclusive"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "resource_candidate" },
+          "comparability": { "const": "comparable" }
+        },
+        "required": ["intent", "comparability"]
+      },
+      "then": {
+        "properties": {
+          "checkedConditions": {
+            "allOf": [
+              { "$ref": "#/$defs/sharedMatch" },
+              {
+                "properties": {
+                  "resources": { "const": "differ" },
+                  "imageDigest": { "const": "match" },
+                  "sourceRevision": { "const": "match" }
+                }
+              }
+            ]
+          },
+          "deltas": { "type": "object" },
+          "budget": { "properties": { "outcome": { "const": "not_evaluated" } } },
+          "ciVerdict": { "enum": ["pass", "fail"] },
+          "baselineSlo": { "enum": ["passed", "failed"] },
+          "candidateSlo": { "enum": ["passed", "failed"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "code_regression" },
+          "ciVerdict": { "const": "pass" }
+        },
+        "required": ["intent", "ciVerdict"]
+      },
+      "then": {
+        "properties": {
+          "comparability": { "const": "comparable" },
+          "budget": { "properties": { "outcome": { "const": "within_budget" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "code_regression" },
+          "ciVerdict": { "const": "fail" }
+        },
+        "required": ["intent", "ciVerdict"]
+      },
+      "then": {
+        "properties": {
+          "comparability": { "const": "comparable" },
+          "budget": { "properties": { "outcome": { "const": "exceeded" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "code_regression" },
+          "ciVerdict": { "const": "inconclusive" }
+        },
+        "required": ["intent", "ciVerdict"]
+      },
+      "then": {
+        "properties": {
+          "comparability": { "const": "comparable" },
+          "budget": { "properties": { "outcome": { "const": "not_evaluated" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "resource_candidate" },
+          "ciVerdict": { "const": "pass" }
+        },
+        "required": ["intent", "ciVerdict"]
+      },
+      "then": {
+        "properties": {
+          "comparability": { "const": "comparable" },
+          "baselineSlo": { "const": "passed" },
+          "candidateSlo": { "const": "passed" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "intent": { "const": "resource_candidate" },
+          "ciVerdict": { "const": "fail" }
+        },
+        "required": ["intent", "ciVerdict"]
+      },
+      "then": {
+        "properties": { "comparability": { "const": "comparable" } },
+        "anyOf": [
+          { "properties": { "baselineSlo": { "const": "failed" } } },
+          { "properties": { "candidateSlo": { "const": "failed" } } }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checkedConditions": {
+            "properties": { "runtimeSettings": { "const": "differ" } },
+            "required": ["runtimeSettings"]
+          }
+        },
+        "required": ["checkedConditions"]
+      },
+      "then": {
+        "properties": {
+          "comparability": { "const": "not_comparable" },
+          "reasonCodes": { "contains": { "const": "runtime_settings_differ" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checkedConditions": {
+            "properties": { "runtimeVersion": { "const": "differ" } },
+            "required": ["runtimeVersion"]
+          }
+        },
+        "required": ["checkedConditions"]
+      },
+      "then": {
+        "properties": {
+          "comparability": { "const": "not_comparable" },
+          "reasonCodes": { "contains": { "const": "runtime_version_differs" } }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "SourceContext",
+  "dataClass": "synthetic_fixture",
+  "runId": "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd",
+  "status": "mismatch",
+  "confirmationMethod": "reproducible_build_record",
+  "causeUse": "hypothesis_only",
+  "logicalService": {
+    "name": "orders",
+    "appRoot": "services/orders",
+    "mapping": "explicit"
+  },
+  "image": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tag": "synthetic"
+  },
+  "git": {
+    "commit": "3333333333333333333333333333333333333333",
+    "dirty": true,
+    "dirtyPaths": [
+      "services/orders/src/routes/orders.ts"
+    ]
+  },
+  "refs": [
+    {
+      "path": "services/orders/src/routes/orders.ts",
+      "symbol": "getOrder",
+      "line": 40,
+      "contentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "role": "allowed_ref"
+    }
+  ]
+}

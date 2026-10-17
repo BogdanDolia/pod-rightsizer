@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Package manifest. Artifact hashes are claimed content hashes. This schema checks which names are required for an outcome. It does not hash files or re-read the cluster.",
+  "title": "Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "dataClass", "runId", "versions", "outcome", "artifacts", "hashMeaning"],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "Manifest" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "tool", "build", "policy", "calculation", "profile", "rules"],
+      "properties": {
+        "schema": { "const": "1.0.0" },
+        "tool": { "type": "string", "minLength": 1 },
+        "build": { "type": "string", "minLength": 1 },
+        "policy": { "const": "policy-core-1" },
+        "calculation": { "const": "recommender-core-1" },
+        "profile": { "const": "g5-contract-1" },
+        "rules": {
+          "description": "nodejs-rules-0 means no executable rule pack is shipped with schema 1.0.0.",
+          "const": "nodejs-rules-0"
+        }
+      }
+    },
+    "outcome": {
+      "description": "Copy of the analysis axes used to decide the file set. T08 must check that this copy matches analysis.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution", "evidence", "slo", "patch", "candidate"],
+      "properties": {
+        "execution": { "$ref": "defs.schema.json#/$defs/execution" },
+        "evidence": { "$ref": "defs.schema.json#/$defs/evidenceState" },
+        "slo": { "$ref": "defs.schema.json#/$defs/sloState" },
+        "patch": { "$ref": "defs.schema.json#/$defs/patchState" },
+        "candidate": { "$ref": "defs.schema.json#/$defs/candidateState" }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256", "bytes"],
+        "properties": {
+          "name": {
+            "enum": [
+              "run-spec.json",
+              "analysis.json",
+              "observations.json",
+              "runtime-findings.json",
+              "source-context.json",
+              "report.md",
+              "agent-brief.md",
+              "resource-patch.yaml"
+            ]
+          },
+          "sha256": { "$ref": "defs.schema.json#/$defs/sha256" },
+          "bytes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "hashMeaning": { "$ref": "defs.schema.json#/$defs/hashMeaning" }
+  },
+  "allOf": [
+    {
+      "properties": {
+        "artifacts": {
+          "allOf": [
+            { "contains": { "properties": { "name": { "const": "run-spec.json" } }, "required": ["name"] } },
+            { "contains": { "properties": { "name": { "const": "analysis.json" } }, "required": ["name"] } },
+            { "contains": { "properties": { "name": { "const": "observations.json" } }, "required": ["name"] } }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": { "execution": { "const": "completed" } },
+            "required": ["execution"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "allOf": [
+              { "contains": { "properties": { "name": { "const": "runtime-findings.json" } }, "required": ["name"] } },
+              { "contains": { "properties": { "name": { "const": "source-context.json" } }, "required": ["name"] } },
+              { "contains": { "properties": { "name": { "const": "report.md" } }, "required": ["name"] } }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "execution": { "const": "completed" },
+              "evidence": { "const": "valid" },
+              "slo": { "const": "passed" }
+            },
+            "required": ["execution", "evidence", "slo"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "contains": {
+              "properties": { "name": { "const": "agent-brief.md" } },
+              "required": ["name"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": { "patch": { "const": "dry_run_passed" } },
+            "required": ["patch"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "contains": {
+              "properties": { "name": { "const": "resource-patch.yaml" } },
+              "required": ["name"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": { "patch": { "not": { "const": "dry_run_passed" } } },
+            "required": ["patch"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "not": {
+              "contains": {
+                "properties": { "name": { "const": "resource-patch.yaml" } },
+                "required": ["name"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

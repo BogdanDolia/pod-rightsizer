@@ -1,0 +1,150 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Observations",
+  "dataClass": "synthetic_fixture",
+  "runId": "55555555-5555-4555-8555-555555555555",
+  "workload": {
+    "discovery": "read",
+    "namespace": "rightsizer-synthetic",
+    "name": "orders-api",
+    "container": "api",
+    "deploymentUid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "deploymentGeneration": 7,
+    "podSelector": "app=orders",
+    "replicas": {
+      "desired": 2,
+      "observed": 2
+    },
+    "image": {
+      "reference": "example.invalid/orders-api:synthetic",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "stability": {
+      "deploymentUid": "unchanged",
+      "generation": "unchanged",
+      "imageDigest": "unchanged",
+      "containerRestarted": false,
+      "replicasFixed": true
+    }
+  },
+  "identityStable": true,
+  "ownerChain": [
+    {
+      "kind": "ReplicaSet",
+      "name": "orders-api-synthetic",
+      "uid": "aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa"
+    }
+  ],
+  "pods": [
+    {
+      "name": "orders-api-a",
+      "uid": "aaaaaaaa-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+      "ownerUid": "aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa",
+      "containerId": "containerd://synthetic-orders-api-a",
+      "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    },
+    {
+      "name": "orders-api-b",
+      "uid": "aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa",
+      "ownerUid": "aaaaaaaa-bbbb-4bbb-8bbb-aaaaaaaaaaaa",
+      "containerId": "containerd://synthetic-orders-api-b",
+      "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    }
+  ],
+  "serviceMapping": {
+    "status": "verified",
+    "serviceName": "orders",
+    "routeProof": "endpoint_slice"
+  },
+  "autoscaler": {
+    "hpa": {
+      "discovery": "read",
+      "state": "absent"
+    },
+    "vpa": {
+      "discovery": "read",
+      "state": "absent"
+    }
+  },
+  "load": {
+    "executed": true,
+    "termination": "context_canceled",
+    "requests": 0,
+    "httpErrors": 0,
+    "actualRps": null,
+    "httpErrorRate": null,
+    "latency": {
+      "semantics": "until_response_headers",
+      "p50Ns": {
+        "state": "missing_signal"
+      },
+      "p95Ns": {
+        "state": "missing_signal"
+      },
+      "p99Ns": {
+        "state": "missing_signal"
+      }
+    },
+    "usefulThroughputRps": null,
+    "droppedIterations": null,
+    "generatorSaturated": null,
+    "interval": {
+      "startedAt": "2026-10-17T12:00:00Z",
+      "finishedAt": "2026-10-17T12:05:00Z",
+      "clock": "collector_local"
+    }
+  },
+  "windows": [
+    {
+      "id": "w5",
+      "sourceTimestamp": "2026-10-17T12:00:15Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:00:16Z",
+      "disposition": "discarded",
+      "discardReason": "outside_measured_interval",
+      "cpuMilliMax": 90,
+      "memoryBytesMax": 140000000,
+      "replayInputs": {
+        "cpuCores": 0.09,
+        "memoryMi": 133.5
+      },
+      "replicas": [
+        {
+          "podUid": "aaaaaaaa-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+          "cpuMilli": 90,
+          "memoryBytes": 140000000
+        },
+        {
+          "podUid": "aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa",
+          "cpuMilli": 50,
+          "memoryBytes": 138951424
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "expectedPodUids": [
+      "aaaaaaaa-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+      "aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa"
+    ],
+    "podsWithMetrics": [
+      "aaaaaaaa-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+      "aaaaaaaa-dddd-4ddd-8ddd-aaaaaaaaaaaa"
+    ],
+    "complete": true,
+    "independentWindowCount": 0,
+    "discardedWindowCount": 1
+  }
+}

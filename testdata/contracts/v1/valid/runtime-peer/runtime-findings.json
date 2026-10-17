@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "RuntimeFindings",
+  "dataClass": "synthetic_fixture",
+  "runId": "16161616-1616-4161-8161-161616161616",
+  "profile": {
+    "id": "nodejs",
+    "version": "g5-contract-1",
+    "capabilityLevel": "context_only",
+    "applicability": "applicable",
+    "selection": "explicit"
+  },
+  "rulesAggregate": "missing_signal",
+  "nodejs": {
+    "observedVersion": {
+      "state": "known",
+      "version": "20.18.0"
+    },
+    "support": {
+      "status": "pending_t02",
+      "line": null
+    },
+    "processRole": "http_server",
+    "eventLoop": {
+      "delay": {
+        "state": "missing_signal"
+      },
+      "utilization": {
+        "state": "missing_signal"
+      }
+    },
+    "gc": {
+      "state": "missing_signal"
+    },
+    "memory": {
+      "heapUsedBytes": {
+        "state": "known",
+        "bytes": 50000000
+      },
+      "heapTotalBytes": {
+        "state": "missing_signal"
+      },
+      "rssBytes": {
+        "state": "missing_signal"
+      },
+      "externalBytes": {
+        "state": "missing_signal"
+      },
+      "arrayBuffersBytes": {
+        "state": "missing_signal"
+      },
+      "containerMemoryBytes": {
+        "state": "missing_signal"
+      },
+      "maxOldSpaceSizeBytes": {
+        "state": "missing_signal"
+      },
+      "counterOverlap": "array_buffers_subset_of_external"
+    }
+  },
+  "findings": [
+    {
+      "id": "nodejs-event-loop-delay",
+      "ruleId": "nodejs.event_loop.delay",
+      "ruleVersion": "0.0.0",
+      "evaluation": "missing_signal",
+      "severity": "info",
+      "evidenceRefs": [],
+      "missingSignals": [
+        "nodejs.event_loop.delay_ns"
+      ],
+      "conclusion": "not_inferred",
+      "nextAction": "Collect event-loop delay for the measured process and interval before treating container CPU as the bottleneck."
+    },
+    {
+      "id": "nodejs-gc",
+      "ruleId": "nodejs.gc.pauses",
+      "ruleVersion": "0.0.0",
+      "evaluation": "missing_signal",
+      "severity": "info",
+      "evidenceRefs": [],
+      "missingSignals": [
+        "nodejs.gc.pause_ns"
+      ],
+      "conclusion": "not_inferred",
+      "nextAction": "Do not treat missing GC data as evidence that GC pressure is absent."
+    }
+  ]
+}

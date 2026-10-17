@@ -145,10 +145,28 @@ jobs:
           node --check site/theme.js
           node --check site/app.js
 
+  contracts:
+    name: Analysis contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate schemas and fixtures
+        run: bash scripts/check-contracts.sh
+
   check:
     name: CI passed
     if: always()
-    needs: [test, kind-e2e, release-snapshot, site]
+    needs: [test, kind-e2e, release-snapshot, site, contracts]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
 
@@ -159,8 +177,9 @@ jobs:
           KIND_RESULT: ${{ needs.kind-e2e.result }}
           SNAPSHOT_RESULT: ${{ needs.release-snapshot.result }}
           SITE_RESULT: ${{ needs.site.result }}
+          CONTRACTS_RESULT: ${{ needs.contracts.result }}
         run: |
-          for result in "$TEST_RESULT" "$KIND_RESULT" "$SNAPSHOT_RESULT" "$SITE_RESULT"; do
+          for result in "$TEST_RESULT" "$KIND_RESULT" "$SNAPSHOT_RESULT" "$SITE_RESULT" "$CONTRACTS_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "A required CI job did not succeed: $result"
               exit 1

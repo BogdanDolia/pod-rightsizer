@@ -70,11 +70,16 @@ Local checks and preview:
 
 ```bash
 python3 scripts/check-site.py
+node --check site/theme.js
 node --check site/app.js
 python3 -m http.server 8000 --directory site --bind 127.0.0.1
 ```
 
 Open `http://127.0.0.1:8000/`. No JavaScript dependencies or site build step are required.
+
+The site offers Light, Dark, and System appearance modes. System is the default and follows OS changes while the page is open. Explicit choices persist under `pod-rightsizer-theme` in local storage and synchronize across tabs. `theme.js` runs before the stylesheet to avoid flashing the wrong theme; if storage is unavailable, the controls still work for the current page. Without JavaScript, CSS follows the system appearance.
+
+The visual hierarchy follows the tsastat site with a deeper green palette: separate background and card surfaces, restrained accents, softer dark-mode text, and consistent focus indicators. Resource labels and numerical values accompany chart colors. Keep both dark token blocks in `site/styles.css` aligned, and check both themes on narrow screens when editing the site. Reduced-motion preferences disable smooth scrolling and transitions.
 
 ## Deliberate differences from tsastat
 

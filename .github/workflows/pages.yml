@@ -35,6 +35,7 @@ jobs:
       - name: Check website
         run: |
           python3 scripts/check-site.py
+          node --check site/theme.js
           node --check site/app.js
 
       - name: Configure GitHub Pages

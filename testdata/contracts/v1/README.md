@@ -43,7 +43,7 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/comparison-rejected/` | Intent `resource_candidate`. Candidate SLO failed, `ciVerdict` `fail`. |
 | `valid/comparison-not-comparable/` | Runtime version differs. `comparability` `not_comparable`, deltas null, `ciVerdict` `not_comparable`. |
 
-`valid/resource-candidate/resource-patch.yaml` is a synthetic strategic-merge example. `cpu: null` means the limit is absent. It is not an unknown quantity and it was not applied.
+`valid/resource-candidate/resource-patch.yaml` is a synthetic strategic-merge example. `cpu: null` means the limit is absent. It is not an unknown quantity and it was not applied. The repository ignore rule for tool-written `resource-patch.yaml` files also matches this path. The fixture is tracked anyway; `.gitignore` is unchanged so real tool output stays ignored.
 
 Markdown files are fixture bodies so completed manifests that name `report.md` and `agent-brief.md` have those files. The schema checks the names inside `manifest.json`, not that the files exist. T08 checks the bytes.
 

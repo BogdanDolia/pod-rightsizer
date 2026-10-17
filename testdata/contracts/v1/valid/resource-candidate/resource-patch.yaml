@@ -1,0 +1,19 @@
+# Synthetic fixture. Not applied to a cluster.
+# cpu: null removes a limit. It is not an unknown value.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: rightsizer-synthetic
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        resources:
+          requests:
+            cpu: "198m"
+            memory: "174Mi"
+          limits:
+            cpu: null
+            memory: "209Mi"

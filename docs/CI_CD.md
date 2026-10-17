@@ -21,10 +21,12 @@ The workflow follows [tsastat](https://github.com/HelixThinker/tsastat/tree/2680
 | `GoReleaser snapshot` | Build Linux amd64/arm64 archives; extract the amd64 archive and start its packaged Advisor UI without using source-tree files |
 | `Website checks` | Validate local asset/fragment links and JavaScript syntax |
 | `Analysis contract` | `bash scripts/check-contracts.sh`: compile `contracts/v1` and validate `testdata/contracts/v1` |
-| `Node HTTP fixture` | Node.js 24.22.0 and `bash scripts/check-node-http.sh`: functional checks of the reference service. Docker, k6, and kind experiments are not part of this job |
+| `Node HTTP fixture` | Node.js 24.22.0 and `bash scripts/check-node-http.sh`: functional checks. Separately install checksum-pinned upstream k6 1.8.2 and run `test:k6`: the baseline must pass and HTTP 200 with a wrong total must fail measured application checks. Docker, regression-mode, and kind experiments remain separate |
 | `CI passed` | Require all preceding jobs to succeed |
 
 The kind scenario validates resource patch behavior; it does not perform a full load-test/Metrics Server integration test. Coverage is collected, without an arbitrary global percentage threshold.
+
+The fixture job installs unchanged k6 with `bash scripts/install-fixture-k6.sh <bin-directory>` and the committed version/checksums in `test/fixtures/node-http/scenario/`. It is an external test dependency, not a Go library or a component of the Pod Rightsizer release or fixture image. See the fixture README for installation and the separate upstream AGPLv3 license. A missing or wrong-version runner fails the k6 check without falling back to the built-in Go tester. Local smoke summaries, raw metrics, and logs are saved under the ignored fixture `.experiments/k6-smoke-*` directory.
 
 Weekly Dependabot updates cover Go modules and GitHub Actions. Action references are pinned to commit SHAs and updated together. Kubernetes modules (`k8s.io/*` and `sigs.k8s.io/*`) are grouped for both version and security updates: upgrading `apimachinery` or `api` independently of `client-go` can produce incompatible generated code. Kubernetes v0.37.1 requires Go 1.26; the minimum CI job follows `go.mod` automatically when a dependency update raises that requirement. Docker and user-facing build instructions must be updated alongside a change in the required Go series.
 

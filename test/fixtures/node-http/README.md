@@ -112,6 +112,22 @@ docker build \
 
 The Dockerfile is multi-stage. Both build stages and the runtime stage use the digest above. The runtime stage copies production `node_modules` and `dist`, then runs as the image's `node` user. It does not copy the git checkout, tests, or local reports. The official image still contains the Node.js toolchain; application dependencies are production-only.
 
+## Install the external k6 runner
+
+k6 is a separate, unchanged upstream program. It is not imported into the Go module, copied into the Express image, or bundled in Pod Rightsizer release archives. The fixture runner pin is `scenario/k6-version`; archive SHA-256 values are pinned in `scenario/k6-checksums.txt` from the [upstream v1.8.2 release](https://github.com/grafana/k6/releases/tag/v1.8.2).
+
+From the repository root on Linux or macOS, amd64 or arm64:
+
+```bash
+bash scripts/install-fixture-k6.sh "$PWD/.tools/k6/bin"
+export PATH="$PWD/.tools/k6/bin:$PATH"
+k6 version
+```
+
+The installer requires `curl`, a SHA-256 utility (`sha256sum` or `shasum`), and `tar` on Linux or `unzip` on macOS. It downloads only the pinned official archive, verifies its committed checksum, and installs the binary in the requested directory. Updating k6 requires reviewing its version, archive checksums, scenario compatibility, and license together. CI runs the same installer in its temporary directory. Checks do not install k6 automatically, and a missing or wrong-version runner is an error rather than a fallback to the built-in Go tester.
+
+Pod Rightsizer is licensed under [Apache 2.0](../../../LICENSE). The separately installed k6 1.8.2 is licensed under [AGPLv3](https://github.com/grafana/k6/blob/v1.8.2/LICENSE.md), and its license applies to that upstream program. This integration invokes the documented CLI; it does not modify or embed k6. Redistributing k6 or modifying/embedding its code requires a separate review of the applicable license obligations. Local execution does not require a Grafana Cloud account.
+
 ## Checks
 
 From the repository root:
@@ -121,6 +137,14 @@ bash scripts/check-node-http.sh
 ```
 
 That is the fast level: the Node and npm pins, `npm ci`, the fixture tests, and a second build whose JavaScript, maps, and manifest hashes match the first. It prints `RESULT level=fast`. Missing Docker, k6, or kind is listed as `UNVERIFIED` and is not a pass.
+
+After the fast check has built the fixture and test helpers, run the standalone k6 smoke check:
+
+```bash
+npm --prefix test/fixtures/node-http run test:k6
+```
+
+This uses the separately installed runner to execute the real scenario against the baseline and then against a local HTTP 200 stub that changes only the total. The baseline must exit successfully; the stub run must exit unsuccessfully with failed measured application checks and no HTTP errors. Summaries, raw metrics, and logs are saved under `.experiments/k6-smoke-*`. The smoke check cleans up both servers and fails on a missing/wrong-version runner or a k6 timeout. It does not run Docker, kind, or performance comparisons. CI requires both the fast and k6 smoke levels.
 
 ```bash
 bash scripts/check-node-http.sh --experiments
@@ -164,7 +188,8 @@ Run that twice against one process or one container for the baseline repeat. For
 
 | Task | Owns |
 | --- | --- |
-| T10 | Go k6 adapter, canonical scenario integration, typed load outcome, and the link from the measured phase to Metrics API windows |
+| T03/T04 | Engine-independent load-provider types, capabilities, common SLO evaluation, and CLI/API orchestration through that interface |
+| T10 | External unchanged k6 CLI adapter, canonical scenario integration, typed outcome, measured-phase/metrics linkage, and removal of the built-in Go generator/local adapter without a compatibility period or runtime fallback |
 | T12 | Runtime profile, `runtime.json` import, and executable Node.js rules |
 | T14 | Comparison engine, noise policy, and the CI regression verdict |
 | T17 | Full measured Pod Rightsizer end-to-end run |

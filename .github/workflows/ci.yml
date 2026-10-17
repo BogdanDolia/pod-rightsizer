@@ -163,10 +163,29 @@ jobs:
       - name: Validate schemas and fixtures
         run: bash scripts/check-contracts.sh
 
+  node-http-fixture:
+    name: Node HTTP fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.0
+          cache: npm
+          cache-dependency-path: test/fixtures/node-http/package-lock.json
+
+      - name: Check the reference fixture
+        run: bash scripts/check-node-http.sh
+
   check:
     name: CI passed
     if: always()
-    needs: [test, kind-e2e, release-snapshot, site, contracts]
+    needs: [test, kind-e2e, release-snapshot, site, contracts, node-http-fixture]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
 
@@ -178,8 +197,9 @@ jobs:
           SNAPSHOT_RESULT: ${{ needs.release-snapshot.result }}
           SITE_RESULT: ${{ needs.site.result }}
           CONTRACTS_RESULT: ${{ needs.contracts.result }}
+          NODE_HTTP_RESULT: ${{ needs.node-http-fixture.result }}
         run: |
-          for result in "$TEST_RESULT" "$KIND_RESULT" "$SNAPSHOT_RESULT" "$SITE_RESULT" "$CONTRACTS_RESULT"; do
+          for result in "$TEST_RESULT" "$KIND_RESULT" "$SNAPSHOT_RESULT" "$SITE_RESULT" "$CONTRACTS_RESULT" "$NODE_HTTP_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "A required CI job did not succeed: $result"
               exit 1

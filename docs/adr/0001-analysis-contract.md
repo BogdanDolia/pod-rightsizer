@@ -173,7 +173,7 @@ Findings:
 - There is no `healthy` or `problem_absent` conclusion.
 - Profile `generic` is `generic_only`, rules `not_applicable`, and `nodejs` is null.
 - Profile `nodejs` is applicable. Capability `context_only` cannot contain an evaluated finding. `rules_available` needs an evaluated finding and still has aggregate `missing_signal` when any finding is missing. `telemetry_validated` needs aggregate `evaluated`, at least one evaluated finding, and no missing-signal finding.
-- Node.js support status in the contract is `pending_t02` and the LTS line is null. An observed process version such as `22.14.0` is a measurement, not the support pin.
+- Node.js support status is `pinned_lts` and the LTS line is `24`. T02 selected Node.js 24 (Krypton), the Active LTS line on 2026-10-17. The reference fixture patch `24.22.0` and the base image digest live in `test/fixtures/node-http/README.md`. An observed process version such as `22.14.0` remains a measurement, not the support pin.
 - Memory counters are separate. `arrayBuffers` is a subset of `external` (`counterOverlap: array_buffers_subset_of_external`) and must not be added to it.
 
 Source context:
@@ -201,10 +201,12 @@ Observations:
 | Calculation | `recommender-core-1` | The current formula, including legacy replay floats and zero-means-absent in `replayInputs` only. |
 | Profile | `g5-contract-1` | Data shape for `nodejs` and `generic`. |
 | Rules | `nodejs-rules-0`, finding `ruleVersion` `0.0.0` | Rules are not executed. T12 replaces this. |
-| Node support | `pending_t02` | T02 pins the LTS line and base image. |
+| Node support | `pinned_lts`, line `24` | The supported major. The fixture patch and base image are not this field. |
 | Noise policy | JSON `null` while outcome is `not_evaluated` | A string is required only for `within_budget` or `exceeded`. |
 
 Before the first release that ships these schemas, a later task may edit `1.0.0` together with the fixtures. After that release, an incompatible change bumps the major version and lives in a new directory. An additive change bumps the minor version. Old readers reject the unknown version because the const does not match. New fields are not silently ignored.
+
+T02 keeps `schemaVersion` `1.0.0`. No git tag has been published, the CLI and Advisor API do not emit these documents, and the GoReleaser archives do not contain `contracts/v1`. Replacing `pending_t02` with the shared `nodeSupport` pin is an in-place clarification of the unshipped schema, together with the fixtures. It does not relax execution, evidence, source, or comparison gates.
 
 An unknown profile id, framework, intent, or verdict is a schema change, not an open string.
 
@@ -280,7 +282,7 @@ Adjacent notes, owned by the next task rather than fixed here:
 
 | Item | Owner |
 | --- | --- |
-| Node.js LTS line and base image | T02 |
+| Node.js LTS line and base image | Decided in T02. Line `24`, fixture patch `24.22.0`, image `node:24.22.0-bookworm-slim`. See `test/fixtures/node-http/README.md`. |
 | k6 wrapper version and canonical scenario id. `builtin-get` / `legacy-1` remains the legacy scenario. | T10 |
 | Numeric noise budget | T14 after T02 and T18 |
 | Float replay equality against `GenerateRecommendations` | T09 |

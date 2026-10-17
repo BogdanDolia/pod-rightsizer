@@ -34,3 +34,10 @@ resource-patch.yaml
 
 # GoReleaser output
 /dist/
+
+# Node reference fixture build and local experiment output
+node_modules/
+test/fixtures/node-http/dist/
+test/fixtures/node-http/dist-test/
+test/fixtures/node-http/.experiments/
+.tools/

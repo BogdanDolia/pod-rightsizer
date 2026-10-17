@@ -513,6 +513,22 @@
         }
       ]
     },
+    "nodeSupport": {
+      "description": "Product support pin for the Node.js profile. line is the supported LTS major. It is not the observed process version and not the reference fixture patch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "line"],
+      "properties": {
+        "status": {
+          "description": "pinned_lts means T02 selected one supported LTS line.",
+          "const": "pinned_lts"
+        },
+        "line": {
+          "description": "Node.js 24 (Krypton), the Active LTS line on 2026-10-17. Node.js 26 was Current and was not selected. Node.js 22 remains Maintenance LTS but is not this pin. The reference fixture patch is 24.22.0 and is recorded with the fixture, not here.",
+          "const": "24"
+        }
+      }
+    },
     "nodeVersion": {
       "description": "Observed Node.js version of the measured process. unknown is not version 0 and is not the supported LTS pin.",
       "oneOf": [

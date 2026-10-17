@@ -1,0 +1,7 @@
+{
+  "items": [
+    { "sku": "apple", "quantity": 2 },
+    { "sku": "bread", "quantity": 1 },
+    { "sku": "milk", "quantity": 3 }
+  ]
+}

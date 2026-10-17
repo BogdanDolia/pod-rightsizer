@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-http-reference
+  namespace: pod-rightsizer-node-http
+spec:
+  template:
+    spec:
+      containers:
+        - name: node-http
+          env:
+            - name: NODE_HTTP_MODE
+              value: cpu
+            - name: NODE_HTTP_INTENSITY
+              value: "4"

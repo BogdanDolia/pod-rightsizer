@@ -5,7 +5,7 @@ The workflow follows [tsastat](https://github.com/HelixThinker/tsastat/tree/2680
 ## Branches and pull requests
 
 - `main` is the integration and release branch. Create short-lived branches from an updated `main`, for example `codex/ci-release-alignment`.
-- Open a pull request targeting `main`. The `CI passed` check must succeed before merging. This aggregate check fails if any test, kind, snapshot, website, or analysis-contract job fails or is skipped.
+- Open a pull request targeting `main`. The `CI passed` check must succeed before merging. This aggregate check fails if any test, kind, snapshot, website, analysis-contract, or Node HTTP fixture job fails or is skipped.
 - Changes must go through a PR; an additional person's approval is not required. Resolve review discussions before merging. Force pushes and branch deletion are blocked on `main`.
 - Use squash merge for a focused change. GitHub deletes merged head branches automatically. No persistent `develop` or release branch is needed.
 - Repository rules are configured in GitHub, separately from these versioned workflows. Changes to the CI job graph must preserve the `CI passed` check name or update the rule at the same time.
@@ -21,6 +21,7 @@ The workflow follows [tsastat](https://github.com/HelixThinker/tsastat/tree/2680
 | `GoReleaser snapshot` | Build Linux amd64/arm64 archives; extract the amd64 archive and start its packaged Advisor UI without using source-tree files |
 | `Website checks` | Validate local asset/fragment links and JavaScript syntax |
 | `Analysis contract` | `bash scripts/check-contracts.sh`: compile `contracts/v1` and validate `testdata/contracts/v1` |
+| `Node HTTP fixture` | Node.js 24.22.0 and `bash scripts/check-node-http.sh`: functional checks of the reference service. Docker, k6, and kind experiments are not part of this job |
 | `CI passed` | Require all preceding jobs to succeed |
 
 The kind scenario validates resource patch behavior; it does not perform a full load-test/Metrics Server integration test. Coverage is collected, without an arbitrary global percentage threshold.

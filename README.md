@@ -30,6 +30,14 @@ bash scripts/check-contracts.sh
 
 The decision record is [docs/adr/0001-analysis-contract.md](docs/adr/0001-analysis-contract.md).
 
+The Node.js reference fixture used by later measurement work lives in `test/fixtures/node-http`. It is not part of the release archives. From the repository root:
+
+```bash
+bash scripts/check-node-http.sh
+```
+
+That command runs the fast functional checks and says so. Docker, k6, and kind checks are separate and are not reported as passed when they are skipped. See [test/fixtures/node-http/README.md](test/fixtures/node-http/README.md).
+
 The default CPU limit policy is `none` to avoid CPU throttling. The default memory limit is `1.2 × memory request`. A zero limit in the typed recommendation is rendered as `null` in the strategic merge patch so an existing limit is removed.
 
 ## Build

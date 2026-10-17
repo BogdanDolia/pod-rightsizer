@@ -1,0 +1,54 @@
+# Disposable local kind example. These requests and limits are not a production recommendation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-http-reference
+  namespace: pod-rightsizer-node-http
+  labels:
+    app.kubernetes.io/name: node-http-reference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: node-http-reference
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: node-http-reference
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: node-http
+          image: node-http-reference:local
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: NODE_HTTP_MODE
+              value: baseline
+            - name: NODE_HTTP_INTENSITY
+              value: "0"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

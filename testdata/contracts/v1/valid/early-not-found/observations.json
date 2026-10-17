@@ -30,7 +30,7 @@
   },
   "load": {
     "executed": false,
-    "termination": "invalid_target",
+    "termination": "not_started",
     "requests": 0,
     "httpErrors": 0,
     "actualRps": null,

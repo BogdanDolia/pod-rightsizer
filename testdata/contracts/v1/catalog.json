@@ -143,6 +143,16 @@
       ]
     },
     {
+      "id": "invalid-identity-stable-after-change",
+      "schema": "observations.schema.json",
+      "document": "invalid/identity-stable-after-change.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/identityStable",
+        "value must be false"
+      ]
+    },
+    {
       "id": "invalid-load-not-started-with-errors",
       "schema": "observations.schema.json",
       "document": "invalid/load-not-started-with-errors.json",
@@ -269,6 +279,16 @@
       "errorContains": [
         "/workload",
         "missing property 'deploymentUid'"
+      ]
+    },
+    {
+      "id": "invalid-read-without-owner",
+      "schema": "observations.schema.json",
+      "document": "invalid/read-without-owner.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/ownerChain",
+        "minItems: got 0, want 1"
       ]
     },
     {
@@ -488,6 +508,16 @@
       "expect": "invalid",
       "errorContains": [
         "/pods",
+        "maxItems: got 1, want 0"
+      ]
+    },
+    {
+      "id": "invalid-unread-with-window",
+      "schema": "observations.schema.json",
+      "document": "invalid/unread-with-window.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/windows",
         "maxItems: got 1, want 0"
       ]
     },
@@ -750,9 +780,27 @@
       "expect": "valid"
     },
     {
+      "id": "valid-early-not-found-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/early-not-found/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-not-found-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/early-not-found/manifest.json",
+      "expect": "valid"
+    },
+    {
       "id": "valid-early-not-found-observations",
       "schema": "observations.schema.json",
       "document": "valid/early-not-found/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-early-not-found-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/early-not-found/run-spec.json",
       "expect": "valid"
     },
     {

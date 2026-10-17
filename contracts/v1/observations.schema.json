@@ -370,6 +370,7 @@
         "properties": {
           "workload": {
             "properties": {
+              "discovery": { "const": "read" },
               "stability": {
                 "anyOf": [
                   { "properties": { "deploymentUid": { "const": "changed" } }, "required": ["deploymentUid"] },
@@ -380,7 +381,7 @@
                 ]
               }
             },
-            "required": ["stability"]
+            "required": ["discovery", "stability"]
           }
         },
         "required": ["workload"]
@@ -392,6 +393,7 @@
         "properties": {
           "workload": {
             "properties": {
+              "discovery": { "const": "read" },
               "stability": {
                 "properties": {
                   "deploymentUid": { "const": "unchanged" },
@@ -403,7 +405,7 @@
                 "required": ["deploymentUid", "generation", "imageDigest", "containerRestarted", "replicasFixed"]
               }
             },
-            "required": ["stability"]
+            "required": ["discovery", "stability"]
           }
         },
         "required": ["workload"]

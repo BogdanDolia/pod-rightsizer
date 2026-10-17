@@ -186,7 +186,7 @@ Source context:
 Observations:
 
 - Workload `discovery` `read` requires the Deployment UID, generation, image digest, stability, a non-empty owner chain, and at least one pod. `discovery` `not_obtained` records `unreadReason` `forbidden`, `not_found`, or `cancelled_before_discovery`, plus the namespace, name, and container the run asked to read. It stores no UID, digest, owner, pod, or window. Service mapping on that document is `unverified` with `routeProof` `none`. Coverage pod lists are empty and `complete` is false. `identityStable` is false. That false value means stability was not observed. It does not mean the identity changed, and it does not by itself require reason `identity_changed`.
-- `identityStable` is true only when discovery is `read` and UID, generation, image digest, container restart, and replica count are all unchanged. Any of those changes makes the run's evidence invalid for MVP.
+- `identityStable` is true only when discovery is `read` and UID, generation, image digest, container restart, and replica count are all unchanged. Any of those changes makes the run's evidence invalid for MVP. The deferred T05 join applies `identity_changed` only to that read case.
 - Service mapping is `verified` only with `routeProof: endpoint_slice`. `declared_only` and `none` are unverified.
 - A discarded window has a reason (`duplicate_poll`, `overlapping_window`, `outside_measured_interval`, `missing_pod`, `identity_changed`, `container_restart`, `conflicting_snapshot`). An accepted window has a null discard reason.
 - The schema does not recompute independent counts or the max-fold. That is T03 and T09.

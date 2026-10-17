@@ -30,7 +30,7 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/failed-run/` | Execution `failed`, evidence `invalid`, load `not_run`, autoscaler discovery not attempted so the gate is `unknown`. Workload identity was already read. |
 | `valid/early-failure/` | Execution `failed` before Deployment discovery. `unreadReason` is `forbidden`. The document has the requested name and no UID, digest, owner, or pod. Load `executed` is false and termination is `not_started`. |
 | `valid/early-cancel/` | Execution `cancelled` before discovery. `unreadReason` is `cancelled_before_discovery`. Load termination is `context_canceled` and `executed` is false. |
-| `valid/early-not-found/observations.json` | `unreadReason` `not_found`. The load did not start; termination is `invalid_target`. |
+| `valid/early-not-found/` | Execution `failed` before discovery. `unreadReason` is `not_found`. Load `executed` is false and termination is `not_started`. |
 | `valid/requests-both-absent/analysis.json` | Both current requests are `absent`. The recommendation remains. Comparison currents are 0. |
 | `valid/requests-cpu-absent/analysis.json` | CPU request `absent`, memory request `set`. |
 | `valid/requests-memory-absent/analysis.json` | Memory request `absent`, CPU request `set`. |
@@ -97,6 +97,9 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/unread-service-verified.json` | observations | an unread run cannot claim a verified route |
 | `invalid/read-missing-deployment-uid.json` | observations | a read workload requires `deploymentUid` |
 | `invalid/read-without-pods.json` | observations | a read workload requires at least one pod |
+| `invalid/read-without-owner.json` | observations | a read workload requires a non-empty owner chain |
+| `invalid/identity-stable-after-change.json` | observations | a changed image digest cannot set `identityStable` true |
+| `invalid/unread-with-window.json` | observations | an unread run cannot carry a metric window or a pod UID |
 | `invalid/negative-cpu-request.json` | analysis | a set CPU request cannot be negative |
 | `invalid/negative-memory-request.json` | analysis | a set memory request cannot be negative |
 | `invalid/request-encoded-as-zero.json` | analysis | the number 0 is not an absent request |
@@ -123,6 +126,7 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 `semantic-checks.json` is validated against `semantic-checks.schema.json` and does not run its statements. Examples:
 
 - T03 must fold overlapping windows and keep `independentWindowCount` honest.
+- T05 must join `identityStable: false` to `identity_changed` only after discovery `read`. `not_obtained` is false because the Deployment was not read.
 - T09 must recompute `recommender-core-1` from `replayInputs`.
 - T14 must derive `checkedConditions` from the two packages. A schema-valid comparison can still lie about those conditions until that task exists.
 - T08 must hash artifact bytes and compare `outcome` with `analysis.json`.

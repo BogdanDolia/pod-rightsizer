@@ -27,7 +27,7 @@
       "id": "identity-join",
       "owner": "T05",
       "executedBy": "none",
-      "statement": "observations.identityStable false must appear with analysis evidence invalid and identity_changed. Deployment UID equality is required only inside one run.",
+      "statement": "After discovery read, observations.identityStable false must appear with analysis evidence invalid and identity_changed. discovery not_obtained also sets identityStable false and does not require identity_changed, because no UID was read. Deployment UID equality is required only inside one run.",
       "example": "valid/identity-changed/analysis.json"
     },
     {

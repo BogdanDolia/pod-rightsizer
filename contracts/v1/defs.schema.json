@@ -530,7 +530,7 @@
       }
     },
     "nodeVersion": {
-      "description": "Observed Node.js version of the measured process. unknown is not version 0 and is not the supported LTS pin.",
+      "description": "Observed Node.js version field. A known version in a synthetic_fixture document is example data, not a measurement. unknown is not version 0 and is not the supported LTS pin.",
       "oneOf": [
         {
           "type": "object",

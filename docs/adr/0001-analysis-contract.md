@@ -173,7 +173,7 @@ Findings:
 - There is no `healthy` or `problem_absent` conclusion.
 - Profile `generic` is `generic_only`, rules `not_applicable`, and `nodejs` is null.
 - Profile `nodejs` is applicable. Capability `context_only` cannot contain an evaluated finding. `rules_available` needs an evaluated finding and still has aggregate `missing_signal` when any finding is missing. `telemetry_validated` needs aggregate `evaluated`, at least one evaluated finding, and no missing-signal finding.
-- Node.js support status is `pinned_lts` and the LTS line is `24`. T02 selected Node.js 24 (Krypton), the Active LTS line on 2026-10-17. The reference fixture patch `24.22.0` and the base image digest live in `test/fixtures/node-http/README.md`. An observed process version such as `22.14.0` remains a measurement, not the support pin.
+- Node.js support status is `pinned_lts` and the LTS line is `24`. T02 selected Node.js 24 (Krypton), the Active LTS line on 2026-10-17. The reference fixture patch `24.22.0` and the base image digest live in `test/fixtures/node-http/README.md`. A synthetic fixture may still record an observed process version such as `22.14.0`. That value is example data with `dataClass: synthetic_fixture`, not a measurement and not the support pin.
 - Memory counters are separate. `arrayBuffers` is a subset of `external` (`counterOverlap: array_buffers_subset_of_external`) and must not be added to it.
 
 Source context:

@@ -10,8 +10,23 @@ import { startReference } from "./spawn.js";
 
 const execute = promisify(execFile);
 const version = (await readFile(join(fixtureRoot, "scenario/k6-version"), "utf8")).trim();
-const installed = await execute("k6", ["version"]);
-assert.equal(installed.stdout.match(/^k6 v([^\s]+)/m)?.[1], version, "install the pinned external k6 runner");
+let installedVersion = "";
+try {
+  const installed = await execute("k6", ["version"]);
+  installedVersion = installed.stdout.match(/^k6 v([^\s]+)/m)?.[1] ?? "";
+} catch (error) {
+  const failure = error as { code?: string };
+  if (failure.code === "ENOENT") {
+    console.error(`pinned k6 ${version} is not installed; refusing to run and not falling back to the built-in Go tester`);
+    console.error("install: bash scripts/install-fixture-k6.sh <bin-directory>");
+    process.exit(1);
+  }
+  throw error;
+}
+if (installedVersion !== version) {
+  console.error(`pinned k6 ${version} is required, found ${installedVersion || "unknown"}; refusing to run and not falling back to the built-in Go tester`);
+  process.exit(1);
+}
 
 const experiments = join(fixtureRoot, ".experiments");
 await mkdir(experiments, { recursive: true });

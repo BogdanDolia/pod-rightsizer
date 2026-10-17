@@ -39,7 +39,7 @@ The script runs `go run -C tools/contractcheck .`. It compiles every `*.schema.j
 
 `schemaVersion` is the exact string `1.0.0`. Unknown fields are rejected.
 
-Node.js support is the shared `nodeSupport` definition: `status` `pinned_lts` and `line` `24`. That line is the product pin. It is not an observed process version and not the reference fixture patch `24.22.0`. Synthetic fixtures may still record a different `observedVersion`.
+Node.js support is the shared `nodeSupport` definition: `status` `pinned_lts` and `line` `24`. That line is the product pin. It is not an observed process version and not the reference fixture patch `24.22.0`. Synthetic fixtures may still record a different `observedVersion`. Those values are examples of the field, not measurements.
 
 ## What validation guarantees
 

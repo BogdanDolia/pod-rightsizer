@@ -150,13 +150,13 @@ This uses the separately installed runner to execute the real scenario against t
 bash scripts/check-node-http.sh --experiments
 ```
 
-adds the image build, two container runs, SIGTERM, two baseline k6 runs, one k6 run for each regression mode, and a wrong HTTP 200 answer that must fail the scenario. With a usable Docker daemon the k6 runs target `node-http-reference:local`. Raw summaries and metadata are written under `test/fixtures/node-http/.experiments/`, which is gitignored.
+adds the image build, two container runs, SIGTERM, a non-root process check, two baseline k6 runs, one k6 run for each regression mode, and a wrong HTTP 200 answer that must fail the scenario. With a usable Docker daemon the k6 runs target `node-http-reference:local`. Each mode is checked through its quote payload and the telemetry of that same process. p95 and RSS are not regression gates. Raw summaries and metadata are written under `test/fixtures/node-http/.experiments/`, which is gitignored.
 
 ```bash
 bash scripts/check-node-http.sh --kind
 ```
 
-also creates or reuses the disposable kind cluster `pod-rightsizer-node-http`, loads the local image, applies `manifests/overlays/baseline`, checks the quote, restores the previous kubectl context, and deletes the cluster only when this command created it. It uses kubectl context `kind-pod-rightsizer-node-http` only. It does not touch the dry-run pause workload in namespace `pod-rightsizer-e2e`, and it does not change any other cluster.
+also creates or reuses the disposable kind cluster `pod-rightsizer-node-http`, loads the local image, applies `manifests/overlays/baseline`, and checks one replica, a numeric non-root uid, and the quote. The pod sets `runAsNonRoot` with `runAsUser` 1000 because the image user name `node` is not a uid Kubernetes can verify by itself. If this command created the cluster, it deletes that cluster and restores the previous kubectl context even when the deployment does not become ready. It uses kubectl context `kind-pod-rightsizer-node-http` only. It does not touch the dry-run pause workload in namespace `pod-rightsizer-e2e`, and it does not change any other cluster.
 
 Manifests are a fixture example: one container named `node-http`, one replica, an exact selector, and small requests and limits. Those numbers are not a production recommendation. `manifests/overlays/cpu`, `heap`, `buffer`, and `latency` set intensity 4. Switching mode with an environment variable changes runtime settings. That shows the fixture is controllable. It is not a `code_regression` comparison. A `resource_candidate` comparison keeps the image, source, and runtime settings the same and changes only declared resources. T14 owns the noise policy and the CI verdict. This fixture does not emit one.
 

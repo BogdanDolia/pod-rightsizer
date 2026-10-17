@@ -164,6 +164,30 @@ if (quote.totalCents !== 1142) process.exit(1);
 if (metadata.build.verifiedLinkage !== false) process.exit(1);
 if (JSON.stringify(metadata).includes(imageId)) process.exit(1);
 ' "$out/container-a-quote.json" "$out/container-a-metadata.json" "$image_id"
+  uid="$(docker exec "$cid_a" id -u | tr -d '[:space:]')"
+  node_in_image="$(docker exec "$cid_a" node --version | tr -d '[:space:]')"
+  cmdline="$(docker exec "$cid_a" sh -c 'tr "\0" " " < /proc/1/cmdline')"
+  say "container_uid=$uid"
+  say "container_node=$node_in_image"
+  say "container_cmdline=$cmdline"
+  if [[ "$uid" == "0" ]]; then
+    say "FAIL container process is root"
+    fail=1
+  fi
+  if [[ "$node_in_image" != "v24.22.0" ]]; then
+    say "FAIL container Node.js is $node_in_image"
+    fail=1
+  fi
+  if [[ "$cmdline" != *"dist/server.js"* ]]; then
+    say "FAIL container command is not the compiled server"
+    fail=1
+  fi
+  if docker exec "$cid_a" sh -c 'command -v k6 >/dev/null 2>&1'; then
+    say "FAIL k6 binary is inside the fixture image"
+    fail=1
+  else
+    say "image_k6=absent"
+  fi
   docker stop -t 10 "$cid_a" >/dev/null
   exit_a="$(docker inspect "$cid_a" --format '{{.State.ExitCode}}')"
   say "container_a_exit=$exit_a"
@@ -294,20 +318,6 @@ if [[ " ${unverified[*]-} " != *" k6 "* ]]; then
     set -e
     printf '%s\n' "$status"
   }
-  measured_p95() {
-    node --input-type=module -e '
-import { readFileSync } from "node:fs";
-const summary = JSON.parse(readFileSync(process.argv[1], "utf8"));
-const metrics = summary.metrics ?? {};
-const key = Object.keys(metrics).find((name) => name.startsWith("http_req_duration") && name.includes("scenario:measured"));
-if (!key) process.exit(2);
-const stats = metrics[key].values ?? metrics[key];
-const value = stats["p(95)"];
-if (typeof value !== "number") process.exit(2);
-console.log(value);
-' "$1"
-  }
-
   if [[ "$use_image" -eq 1 ]]; then
     say "k6_target=image node-http-reference:local"
   else
@@ -333,6 +343,9 @@ console.log(value);
     say "FAIL baseline k6 run 2 exited $status"
     fail=1
   fi
+  curl -fsS "$base/v1/quote" \
+    -H 'content-type: application/json' \
+    --data-binary @"$fixture/scenario/quote-input.json" > "$out/baseline-quote.json"
   curl -fsS "$base/telemetry" > "$out/baseline-telemetry.json"
   stop_code="$(stop_target "$kind" "$id")"
   say "baseline_target_exit=$stop_code"
@@ -351,6 +364,9 @@ console.log(value);
       say "FAIL ${mode} k6 run exited $status"
       fail=1
     fi
+    curl -fsS "$base/v1/quote" \
+      -H 'content-type: application/json' \
+      --data-binary @"$fixture/scenario/quote-input.json" > "$out/${mode}-quote.json"
     curl -fsS "$base/telemetry" > "$out/${mode}-telemetry.json"
     stop_code="$(stop_target "$kind" "$id")"
     say "${mode}_target_exit=$stop_code"
@@ -390,46 +406,71 @@ if (typeof fails !== "number" || !(fails > 0)) {
 ' "$out/wrong-answer-summary.json"
 
   if [[ "$fail" -eq 0 ]]; then
-    baseline_p95="$(measured_p95 "$out/baseline-1-summary.json")"
-    cpu_p95="$(measured_p95 "$out/cpu-summary.json")"
-    latency_p95="$(measured_p95 "$out/latency-summary.json")"
-    say "baseline_p95_ms=$baseline_p95"
-    say "cpu_p95_ms=$cpu_p95"
-    say "latency_p95_ms=$latency_p95"
-    node --input-type=module -e '
-const baseline = Number(process.argv[1]);
-const cpu = Number(process.argv[2]);
-const latency = Number(process.argv[3]);
-if (!(cpu > baseline)) {
-  console.error(`cpu p95 ${cpu} did not exceed baseline p95 ${baseline}`);
-  process.exit(1);
-}
-if (!(latency > baseline)) {
-  console.error(`latency p95 ${latency} did not exceed baseline p95 ${baseline}`);
-  process.exit(1);
-}
-' "$baseline_p95" "$cpu_p95" "$latency_p95"
+    if [[ "$use_image" -eq 1 ]]; then
+      say "baseline_pair image=node-http-reference:local scenario=node-http-quote/1 mode=baseline intensity=0 runs=2"
+    else
+      say "baseline_pair image=local_node scenario=node-http-quote/1 mode=baseline intensity=0 runs=2"
+    fi
     node --input-type=module -e '
 import { readFileSync } from "node:fs";
-function memory(path) {
-  const body = JSON.parse(readFileSync(path, "utf8"));
-  return body.snapshot.memory;
+const out = process.argv[1];
+function read(name) {
+  return JSON.parse(readFileSync(`${out}/${name}`, "utf8"));
 }
-function retention(path) {
-  return JSON.parse(readFileSync(path, "utf8")).snapshot.retention;
-}
-const baseline = memory(process.argv[1]);
-const buffer = memory(process.argv[2]);
-const heap = retention(process.argv[3]);
-const bufferRetention = retention(process.argv[2]);
-if (!(buffer.arrayBuffersBytes > baseline.arrayBuffersBytes)) {
-  console.error(`buffer arrayBuffers ${buffer.arrayBuffersBytes} did not exceed baseline ${baseline.arrayBuffersBytes}`);
+function fail(message) {
+  console.error(message);
   process.exit(1);
 }
-if (!(bufferRetention.buffer.accountedBytes > 0)) process.exit(1);
-if (!(heap.heap.blocks > 0)) process.exit(1);
-console.log(`buffer_arrayBuffers=${buffer.arrayBuffersBytes} baseline_arrayBuffers=${baseline.arrayBuffersBytes} heap_blocks=${heap.heap.blocks} heap_accounted_bytes=${heap.heap.accountedBytes}`);
-' "$out/baseline-telemetry.json" "$out/buffer-telemetry.json" "$out/heap-telemetry.json"
+const modes = ["baseline", "cpu", "heap", "buffer", "latency"];
+const builds = new Set();
+const processIds = new Set();
+for (const mode of modes) {
+  const metadata = read(`${mode}-metadata.json`);
+  const telemetry = read(`${mode}-telemetry.json`);
+  const quote = read(`${mode}-quote.json`);
+  const regression = quote.regression;
+  const intensity = mode === "baseline" ? 0 : 4;
+  if (quote.subtotalCents !== 1057 || quote.taxCents !== 85 || quote.totalCents !== 1142) fail(`${mode} quote totals`);
+  if (regression.mode !== mode || regression.intensity !== intensity) fail(`${mode} regression identity`);
+  if (metadata.regression.mode !== mode || metadata.regression.intensity !== intensity) fail(`${mode} metadata identity`);
+  if (metadata.process.id !== telemetry.identity.processId || metadata.process.pid !== telemetry.identity.pid) fail(`${mode} process identity`);
+  if (metadata.process.startedAt !== telemetry.identity.startedAt) fail(`${mode} start time`);
+  if (!metadata.process.id || metadata.process.id === String(metadata.process.pid)) fail(`${mode} pid is the only identity`);
+  if (metadata.build.buildId !== telemetry.build.buildId || metadata.build.verifiedLinkage !== false) fail(`${mode} build linkage`);
+  if (metadata.node.version !== "v24.22.0") fail(`${mode} node version`);
+  const memory = telemetry.snapshot.memory;
+  if (!(memory.arrayBuffersBytes <= memory.externalBytes)) fail(`${mode} arrayBuffers is not inside external`);
+  if (memory.rssIsNotContainerMemory !== true) fail(`${mode} rss presented as container memory`);
+  if (telemetry.missingSignals.gc.state !== "missing_signal" || telemetry.missingSignals.containerMemory.state !== "missing_signal") fail(`${mode} missing signal encoded as a number`);
+  const oldSpace = telemetry.settings.oldSpace.maxOldSpaceSize;
+  const heapLimit = telemetry.settings.v8HeapSizeLimit;
+  if (oldSpace.appliesTo !== "v8_old_space" || heapLimit.source !== "v8.getHeapStatistics().heap_size_limit" || heapLimit.unit !== "bytes") fail(`${mode} old space confused with heap limit`);
+  if (oldSpace.state === "unset" && Object.hasOwn(oldSpace, "bytes")) fail(`${mode} unset old space has a byte value`);
+  if (oldSpace.state === "known" && (oldSpace.unit !== "mebibytes" || oldSpace.bytes !== oldSpace.value * 1048576)) fail(`${mode} old space unit`);
+  builds.add(metadata.build.buildId);
+  processIds.add(metadata.process.id);
+}
+if (builds.size !== 1) fail("baseline and regression runs did not share one build");
+if (processIds.size !== modes.length) fail("mode runs did not use separate processes");
+const baseline = read("baseline-quote.json").regression;
+const cpu = read("cpu-quote.json").regression;
+const heap = read("heap-quote.json").regression;
+const buffer = read("buffer-quote.json").regression;
+const latency = read("latency-quote.json").regression;
+if (baseline.cpuIterations !== 0 || baseline.delayMs !== 0 || baseline.heapObjects !== 0 || baseline.bufferBytes !== 0) fail("baseline performed regression work");
+if (cpu.cpuIterations !== 32000000 || typeof cpu.cpuDigest !== "number" || cpu.delayMs !== 0 || cpu.heapObjects !== 0 || cpu.bufferBytes !== 0) fail("cpu mode did not report synchronous work");
+if (latency.delayMs !== 160 || latency.cpuIterations !== 0 || latency.heapObjects !== 0 || latency.bufferBytes !== 0) fail("latency mode did not report the async delay");
+if (heap.heapObjects !== 4000 || typeof heap.heapChecksum !== "number" || heap.bufferBytes !== 0 || heap.cpuIterations !== 0) fail("heap mode did not report object work");
+if (buffer.bufferBytes !== 524288 || typeof buffer.bufferChecksum !== "number" || buffer.heapObjects !== 0 || buffer.cpuIterations !== 0) fail("buffer mode did not report Buffer work");
+const heapRetention = read("heap-telemetry.json").snapshot.retention;
+const bufferRetention = read("buffer-telemetry.json").snapshot.retention;
+const baselineRetention = read("baseline-telemetry.json").snapshot.retention;
+const cap = 2 * 1024 * 1024;
+if (!(heapRetention.heap.blocks > 0) || heapRetention.buffer.blocks !== 0 || heapRetention.heap.accountedBytes > cap) fail("heap retention");
+if (!(bufferRetention.buffer.accountedBytes > 0) || bufferRetention.heap.blocks !== 0 || bufferRetention.buffer.accountedBytes > cap) fail("buffer retention");
+if (baselineRetention.heap.blocks !== 0 || baselineRetention.buffer.blocks !== 0) fail("baseline retained regression blocks");
+console.log(`mode_work=pass build=${[...builds][0]} heap_blocks=${heapRetention.heap.blocks} buffer_accounted_bytes=${bufferRetention.buffer.accountedBytes}`);
+' "$out"
   fi
   say "comparison_verdict=not_claimed"
   say "comparison_reason=changing NODE_HTTP_MODE changes runtime settings; T14 owns comparability and noise policy"
@@ -445,42 +486,65 @@ if [[ "$run_kind" -eq 1 ]]; then
   else
     created=0
     previous=""
+    forward_pid=""
+    cleanup_kind() {
+      if [[ -n "${forward_pid}" ]]; then
+        kill "$forward_pid" >/dev/null 2>&1 || true
+        wait "$forward_pid" >/dev/null 2>&1 || true
+        forward_pid=""
+      fi
+      if [[ -n "${previous}" && "$previous" != "kind-pod-rightsizer-node-http" ]]; then
+        kubectl config use-context "$previous" >/dev/null || true
+      fi
+      if [[ "${created}" -eq 1 ]]; then
+        kind delete cluster --name pod-rightsizer-node-http || true
+        created=0
+      fi
+    }
+    trap cleanup_kind EXIT
     if kubectl config current-context >/dev/null 2>&1; then
       previous="$(kubectl config current-context)"
     fi
     if ! kind get clusters | grep -qx "pod-rightsizer-node-http"; then
-      kind create cluster --name pod-rightsizer-node-http
       created=1
+      kind create cluster --name pod-rightsizer-node-http
     fi
     kind load docker-image node-http-reference:local --name pod-rightsizer-node-http
     kubectl --context kind-pod-rightsizer-node-http apply -k "$fixture/manifests/overlays/baseline"
-    kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http rollout status deployment/node-http-reference --timeout=180s
-    kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http port-forward svc/node-http-reference 18081:80 >"$out/port-forward.log" 2>&1 &
-    forward_pid=$!
-    deadline=$((SECONDS + 20))
-    until curl -fsS http://127.0.0.1:18081/readyz >/dev/null 2>&1; do
-      if (( SECONDS > deadline )); then
-        say "FAIL kind service did not become ready"
-        fail=1
-        break
-      fi
-      sleep 0.3
-    done
-    if curl -fsS http://127.0.0.1:18081/v1/quote -H 'content-type: application/json' --data-binary @"$fixture/scenario/quote-input.json" > "$out/kind-quote.json"; then
-      node --input-type=module -e 'import { readFileSync } from "node:fs"; const q=JSON.parse(readFileSync(process.argv[1],"utf8")); if (q.totalCents!==1142) process.exit(1);' "$out/kind-quote.json"
-      say "kind_quote=pass"
-    else
-      say "FAIL kind quote request failed"
+    if ! kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http rollout status deployment/node-http-reference --timeout=180s; then
+      say "FAIL kind deployment did not become ready"
       fail=1
+    else
+      replicas="$(kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http get deployment/node-http-reference -o jsonpath='{.spec.replicas}')"
+      pod_name="$(kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http get pod -l app.kubernetes.io/name=node-http-reference -o jsonpath='{.items[0].metadata.name}')"
+      pod_uid="$(kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http exec "$pod_name" -- id -u | tr -d '[:space:]')"
+      say "kind_replicas=$replicas"
+      say "kind_pod_uid=$pod_uid"
+      if [[ "$replicas" != "1" || "$pod_uid" == "0" || -z "$pod_uid" ]]; then
+        say "FAIL kind workload replicas or user were not the fixture settings"
+        fail=1
+      fi
+      kubectl --context kind-pod-rightsizer-node-http -n pod-rightsizer-node-http port-forward svc/node-http-reference 18081:80 >"$out/port-forward.log" 2>&1 &
+      forward_pid=$!
+      deadline=$((SECONDS + 20))
+      until curl -fsS http://127.0.0.1:18081/readyz >/dev/null 2>&1; do
+        if (( SECONDS > deadline )); then
+          say "FAIL kind service did not become ready"
+          fail=1
+          break
+        fi
+        sleep 0.3
+      done
+      if curl -fsS http://127.0.0.1:18081/v1/quote -H 'content-type: application/json' --data-binary @"$fixture/scenario/quote-input.json" > "$out/kind-quote.json"; then
+        node --input-type=module -e 'import { readFileSync } from "node:fs"; const q=JSON.parse(readFileSync(process.argv[1],"utf8")); if (q.totalCents!==1142) process.exit(1);' "$out/kind-quote.json"
+        say "kind_quote=pass"
+      else
+        say "FAIL kind quote request failed"
+        fail=1
+      fi
     fi
-    kill "$forward_pid" || true
-    wait "$forward_pid" || true
-    if [[ -n "$previous" && "$previous" != "kind-pod-rightsizer-node-http" ]]; then
-      kubectl config use-context "$previous" >/dev/null
-    fi
-    if [[ "$created" -eq 1 ]]; then
-      kind delete cluster --name pod-rightsizer-node-http
-    fi
+    cleanup_kind
+    trap - EXIT
   fi
 else
   say "UNVERIFIED kind deploy: not requested; not a pass"

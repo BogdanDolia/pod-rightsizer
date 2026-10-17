@@ -20,6 +20,16 @@ Pod Rightsizer measures one container in a Kubernetes Deployment during a load t
 - CLI and Advisor API recommendations are emitted only when the load test meets its configured RPS, HTTP error-rate, and p95 latency SLO.
 - The resource patch is built as a structured Kubernetes object for the resolved Deployment/container and must pass Kubernetes server-side dry-run before it is emitted.
 
+## Analysis contract
+
+`contracts/v1` is a versioned design contract for later analysis, comparison, and handoff work. The CLI and Advisor API do not emit it, and their flags, routes, formulas, and output are unchanged. Schemas and synthetic fixtures are checked with:
+
+```bash
+bash scripts/check-contracts.sh
+```
+
+The decision record is [docs/adr/0001-analysis-contract.md](docs/adr/0001-analysis-contract.md).
+
 The default CPU limit policy is `none` to avoid CPU throttling. The default memory limit is `1.2 × memory request`. A zero limit in the typed recommendation is rendered as `null` in the strategic merge patch so an existing limit is removed.
 
 ## Build

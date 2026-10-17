@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Manifest",
+  "dataClass": "synthetic_fixture",
+  "runId": "99999999-9999-4999-8999-999999999999",
+  "versions": {
+    "schema": "1.0.0",
+    "tool": "0.0.0-dev",
+    "build": "synthetic",
+    "policy": "policy-core-1",
+    "calculation": "recommender-core-1",
+    "profile": "g5-contract-1",
+    "rules": "nodejs-rules-0"
+  },
+  "outcome": {
+    "execution": "completed",
+    "evidence": "valid",
+    "slo": "passed",
+    "patch": "dry_run_passed",
+    "candidate": "validated"
+  },
+  "artifacts": [
+    {
+      "name": "run-spec.json",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "bytes": 128
+    },
+    {
+      "name": "analysis.json",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "bytes": 128
+    },
+    {
+      "name": "observations.json",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "bytes": 128
+    },
+    {
+      "name": "runtime-findings.json",
+      "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "bytes": 128
+    },
+    {
+      "name": "source-context.json",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "bytes": 128
+    },
+    {
+      "name": "report.md",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "bytes": 128
+    },
+    {
+      "name": "agent-brief.md",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bytes": 128
+    },
+    {
+      "name": "resource-patch.yaml",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "bytes": 128
+    }
+  ],
+  "hashMeaning": "content_immutability_not_measurement_truth"
+}

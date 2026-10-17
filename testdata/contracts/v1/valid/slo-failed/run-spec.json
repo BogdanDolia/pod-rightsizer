@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "RunSpec",
+  "dataClass": "synthetic_fixture",
+  "runId": "33333333-3333-4333-8333-333333333333",
+  "mode": "report_only",
+  "patchRequest": "not_requested",
+  "environment": {
+    "role": "staging",
+    "confirmation": "declared"
+  },
+  "workload": {
+    "namespace": "rightsizer-synthetic",
+    "kind": "Deployment",
+    "name": "orders-api",
+    "container": "api",
+    "logicalService": {
+      "name": "orders",
+      "mapping": "explicit"
+    },
+    "replicas": {
+      "desired": 2,
+      "fixedForExperiment": true
+    }
+  },
+  "load": {
+    "mode": "rps",
+    "requestedRps": 50,
+    "requestedDurationNs": 300000000000
+  },
+  "target": {
+    "serviceName": "orders",
+    "namespace": "rightsizer-synthetic",
+    "url": "http://orders.rightsizer-synthetic.example:8080/orders"
+  },
+  "scenario": {
+    "id": "synthetic-http-get",
+    "wrapper": {
+      "name": "builtin-get",
+      "version": "legacy-1"
+    },
+    "latencySemantics": "until_response_headers",
+    "method": "GET",
+    "phases": [
+      {
+        "name": "warmup",
+        "durationNs": 30000000000,
+        "includedInMeasurement": false
+      },
+      {
+        "name": "measured",
+        "durationNs": 270000000000,
+        "includedInMeasurement": true
+      }
+    ],
+    "authFixture": {
+      "id": "none",
+      "version": "none",
+      "secretMaterial": "excluded",
+      "comparability": "known"
+    },
+    "dataFixture": {
+      "id": "synthetic-orders-v1",
+      "version": "1",
+      "secretMaterial": "excluded",
+      "comparability": "known"
+    }
+  },
+  "slo": {
+    "minimumActualRps": 47.5,
+    "maximumHttpErrorRate": 0.01,
+    "maximumP95LatencyNs": 1000000000
+  },
+  "policy": {
+    "version": "policy-core-1",
+    "cpuPercentile": 95,
+    "cpuRequestBufferPercent": 10,
+    "memoryBufferPercent": 20,
+    "cpuLimit": {
+      "mode": "none"
+    },
+    "memoryLimit": {
+      "mode": "request-multiplier",
+      "multiplier": 1.2
+    },
+    "minimumIndependentSamples": 3,
+    "pilot": {
+      "workloadKind": "Deployment",
+      "workloadShape": "http_api",
+      "candidateEnvironment": "staging",
+      "replicasMustRemainFixed": true,
+      "activeAutoscaler": "blocks_candidate",
+      "unknownAutoscaler": "blocks_candidate"
+    }
+  },
+  "runtime": {
+    "profileId": "nodejs",
+    "language": "typescript",
+    "framework": "express",
+    "workloadShape": "http_api",
+    "selection": "explicit",
+    "node": {
+      "support": {
+        "status": "pending_t02",
+        "line": null
+      }
+    }
+  }
+}

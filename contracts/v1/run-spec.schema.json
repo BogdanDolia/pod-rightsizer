@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "RunSpec v1. This is the requested experiment, not its result. No kubeconfig, tokens, headers, environment dumps, or secret material.",
+  "title": "RunSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "dataClass",
+    "runId",
+    "mode",
+    "patchRequest",
+    "environment",
+    "workload",
+    "load",
+    "target",
+    "scenario",
+    "slo",
+    "policy",
+    "runtime"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "RunSpec" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "mode": {
+      "description": "report_only must not ask for a patch. validate_export asks for an API dry-run or a later review export; it does not apply the patch.",
+      "enum": ["report_only", "validate_export"]
+    },
+    "patchRequest": {
+      "enum": ["not_requested", "experimental_dry_run", "review_export"]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "confirmation"],
+      "properties": {
+        "role": { "$ref": "defs.schema.json#/$defs/environmentRole" },
+        "confirmation": {
+          "description": "declared means the caller named the environment. v1 does not claim a cluster probe proved it.",
+          "const": "declared"
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "name", "container", "logicalService", "replicas"],
+      "properties": {
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "kind": { "const": "Deployment" },
+        "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+        "container": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "logicalService": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "mapping"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "mapping": { "const": "explicit" }
+          }
+        },
+        "replicas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desired", "fixedForExperiment"],
+          "properties": {
+            "desired": { "type": "integer", "minimum": 1 },
+            "fixedForExperiment": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "requestedDurationNs"],
+      "properties": {
+        "mode": { "enum": ["rps", "concurrency", "observe"] },
+        "requestedRps": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "requestedDurationNs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 86400000000000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "rps" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "required": ["requestedRps"],
+            "not": { "required": ["concurrency"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "const": "concurrency" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "required": ["concurrency"],
+            "not": { "required": ["requestedRps"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "const": "observe" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["requestedRps"] },
+                { "required": ["concurrency"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceName", "namespace", "url"],
+      "properties": {
+        "serviceName": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "url": {
+          "description": "Null for observe mode. A URL does not by itself prove the Service routes to the Deployment.",
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "defs.schema.json#/$defs/httpUrl" }
+          ]
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "wrapper", "latencySemantics", "method", "phases", "authFixture", "dataFixture"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "wrapper": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "enum": ["builtin-get", "k6-wrapper", "none"] },
+            "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        },
+        "latencySemantics": {
+          "description": "until_response_headers is the legacy tester: time.Since until http.Client.Do returns, before the body is fully read. k6 must declare its own semantics. Comparisons require equal semantics.",
+          "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
+        },
+        "method": { "enum": ["GET", "NONE"] },
+        "phases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": { "$ref": "defs.schema.json#/$defs/phase" },
+          "contains": {
+            "type": "object",
+            "required": ["name", "includedInMeasurement"],
+            "properties": {
+              "name": { "const": "measured" },
+              "includedInMeasurement": { "const": true }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        "authFixture": { "$ref": "defs.schema.json#/$defs/fixtureRef" },
+        "dataFixture": { "$ref": "defs.schema.json#/$defs/fixtureRef" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "wrapper": {
+                "properties": { "name": { "const": "builtin-get" } },
+                "required": ["name"]
+              }
+            },
+            "required": ["wrapper"]
+          },
+          "then": {
+            "properties": {
+              "latencySemantics": { "const": "until_response_headers" },
+              "method": { "const": "GET" },
+              "wrapper": { "properties": { "version": { "const": "legacy-1" } } }
+            }
+          }
+        }
+      ]
+    },
+    "slo": {
+      "description": "Null when there is no load SLO. A null SLO is not_evaluated, not passed. Zero maximumP95LatencyNs disables only the latency gate, matching pkg/loadtest.SLO.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimumActualRps", "maximumHttpErrorRate", "maximumP95LatencyNs"],
+          "properties": {
+            "minimumActualRps": { "type": "number", "minimum": 0 },
+            "maximumHttpErrorRate": { "$ref": "defs.schema.json#/$defs/errorRate" },
+            "maximumP95LatencyNs": { "$ref": "defs.schema.json#/$defs/durationNs" }
+          }
+        }
+      ]
+    },
+    "policy": { "$ref": "defs.schema.json#/$defs/policy" },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "language", "framework", "workloadShape", "selection", "node"],
+      "properties": {
+        "profileId": {
+          "description": "generic performs no Node.js rules. Further runtimes are added by a later schema version, not by an open string.",
+          "enum": ["nodejs", "generic"]
+        },
+        "language": { "enum": ["javascript", "typescript", "unspecified"] },
+        "framework": { "enum": ["express", "unspecified"] },
+        "workloadShape": { "const": "http_api" },
+        "selection": { "enum": ["explicit", "suggested"] },
+        "node": {
+          "description": "Support pin is pending T02. An observed process version belongs in runtime findings, not here.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["support"],
+              "properties": {
+                "support": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["status", "line"],
+                  "properties": {
+                    "status": { "const": "pending_t02" },
+                    "line": { "type": "null" }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "profileId": { "const": "nodejs" } },
+            "required": ["profileId"]
+          },
+          "then": {
+            "properties": {
+              "language": { "enum": ["javascript", "typescript"] },
+              "node": { "type": "object" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "profileId": { "const": "generic" } },
+            "required": ["profileId"]
+          },
+          "then": {
+            "properties": {
+              "language": { "const": "unspecified" },
+              "framework": { "const": "unspecified" },
+              "node": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "mode": { "const": "report_only" } },
+        "required": ["mode"]
+      },
+      "then": { "properties": { "patchRequest": { "const": "not_requested" } } }
+    },
+    {
+      "if": {
+        "properties": { "mode": { "const": "validate_export" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "patchRequest": { "enum": ["experimental_dry_run", "review_export"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "load": {
+            "properties": { "mode": { "const": "observe" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["load"]
+      },
+      "then": {
+        "properties": {
+          "target": { "properties": { "url": { "type": "null" } } },
+          "slo": { "type": "null" },
+          "scenario": {
+            "properties": {
+              "method": { "const": "NONE" },
+              "latencySemantics": { "const": "not_applicable" },
+              "wrapper": {
+                "properties": {
+                  "name": { "const": "none" },
+                  "version": { "const": "none" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "load": {
+            "properties": { "mode": { "enum": ["rps", "concurrency"] } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["load"]
+      },
+      "then": {
+        "properties": {
+          "target": { "properties": { "url": { "type": "string" } } },
+          "slo": { "type": "object" }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Analysis",
+  "dataClass": "synthetic_fixture",
+  "runId": "11111111-1111-4111-8111-111111111111",
+  "calculationVersion": "recommender-core-1",
+  "policyVersion": "policy-core-1",
+  "execution": "completed",
+  "evidence": "valid",
+  "target": "verified",
+  "slo": "passed",
+  "source": "declared",
+  "runtimeRules": "missing_signal",
+  "loadMode": "rps",
+  "environmentRole": "staging",
+  "autoscalerGate": "clear",
+  "candidate": {
+    "state": "not_tested"
+  },
+  "patch": {
+    "state": "not_requested",
+    "purpose": "none"
+  },
+  "gitopsExport": "not_requested",
+  "reasonCodes": [],
+  "limitations": [
+    "missing_signal",
+    "source_declared_not_verified",
+    "confidence_is_evidence_volume"
+  ],
+  "currentSettings": {
+    "cpuRequestMilli": 100,
+    "memoryRequestBytes": 134217728,
+    "cpuLimit": {
+      "state": "absent"
+    },
+    "memoryLimit": {
+      "state": "set",
+      "memoryBytes": 268435456
+    }
+  },
+  "testedSettings": null,
+  "recommendation": {
+    "cpuRequestMilli": 198,
+    "memoryRequestBytes": 182452224,
+    "cpuLimit": {
+      "state": "absent"
+    },
+    "memoryLimit": {
+      "state": "set",
+      "memoryBytes": 219152384
+    },
+    "rounding": "ceil_to_millicore_and_mebibyte",
+    "replayInputs": {
+      "calculationVersion": "recommender-core-1",
+      "cpuRequestCores": 0.198,
+      "cpuLimitCores": 0,
+      "memoryRequestMi": 174.0,
+      "memoryLimitMi": 208.8
+    },
+    "comparison": {
+      "cpuRequest": {
+        "currentMilli": 100,
+        "recommendedMilli": 198,
+        "deltaMilli": 98,
+        "direction": "increase"
+      },
+      "memoryRequest": {
+        "currentBytes": 134217728,
+        "recommendedBytes": 182452224,
+        "deltaBytes": 48234496,
+        "direction": "increase"
+      },
+      "cpuLimit": {
+        "current": {
+          "state": "absent"
+        },
+        "recommended": {
+          "state": "absent"
+        },
+        "direction": "unchanged"
+      },
+      "memoryLimit": {
+        "current": {
+          "state": "set",
+          "memoryBytes": 268435456
+        },
+        "recommended": {
+          "state": "set",
+          "memoryBytes": 219152384
+        },
+        "direction": "decrease"
+      }
+    }
+  },
+  "evidenceConfidence": {
+    "meaning": "evidence_volume",
+    "level": "high",
+    "score": 0.12,
+    "independentSamples": 4,
+    "observationSeconds": 120,
+    "reasons": [
+      "4 independent Metrics API windows contribute 80% of the score (target: 30)",
+      "120 seconds of observation contribute 20% of the score (target: 1800 seconds)"
+    ]
+  },
+  "provenance": {
+    "tool": {
+      "name": "pod-rightsizer",
+      "version": "0.0.0-dev"
+    },
+    "metricsSource": "kubernetes-metrics-api",
+    "claimedInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hashMeaning": "content_immutability_not_measurement_truth"
+  },
+  "explanations": [
+    "Synthetic recommender-core-1 explanation for this fixture. It is not a cluster measurement."
+  ],
+  "diagnostics": null
+}

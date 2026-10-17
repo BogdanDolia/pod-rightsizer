@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Source linkage for one run. A Git SHA or OCI label is a declaration unless confirmationMethod is reproducible_build_record and the tree is clean.",
+  "title": "SourceContext",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "dataClass",
+    "runId",
+    "status",
+    "confirmationMethod",
+    "causeUse",
+    "logicalService",
+    "image",
+    "git",
+    "refs"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "SourceContext" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "status": { "$ref": "defs.schema.json#/$defs/sourceState" },
+    "confirmationMethod": {
+      "enum": [
+        "reproducible_build_record",
+        "oci_revision_label",
+        "git_sha_declaration",
+        "manual_declaration",
+        "none"
+      ]
+    },
+    "causeUse": {
+      "description": "verified_linkage is the only status that allows a file ref to be treated as a cause of measured behavior. hypothesis_only and unavailable must not be upgraded by an assistant.",
+      "enum": ["verified_linkage", "hypothesis_only", "unavailable"]
+    },
+    "logicalService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "appRoot", "mapping"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "appRoot": {
+          "description": "Repository-relative path. Not an absolute machine path and not a URL with credentials.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/-]+$"
+        },
+        "mapping": { "const": "explicit" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "tag"],
+      "properties": {
+        "digest": { "$ref": "defs.schema.json#/$defs/imageDigest" },
+        "tag": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "dirty", "dirtyPaths"],
+      "properties": {
+        "commit": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "defs.schema.json#/$defs/gitCommit" }
+          ]
+        },
+        "dirty": { "type": "boolean" },
+        "dirtyPaths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._/-]+$" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "dirty": { "const": false } },
+            "required": ["dirty"]
+          },
+          "then": { "properties": { "dirtyPaths": { "maxItems": 0 } } }
+        },
+        {
+          "if": {
+            "properties": { "dirty": { "const": true } },
+            "required": ["dirty"]
+          },
+          "then": { "properties": { "dirtyPaths": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "symbol", "line", "contentSha256", "role"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._/-]+$" },
+          "symbol": { "type": "string", "minLength": 1 },
+          "line": { "type": "integer", "minimum": 1 },
+          "contentSha256": { "$ref": "defs.schema.json#/$defs/sha256" },
+          "role": { "enum": ["allowed_ref", "verified_cause"] }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "verified" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "confirmationMethod": { "const": "reproducible_build_record" },
+          "causeUse": { "const": "verified_linkage" },
+          "git": {
+            "properties": {
+              "dirty": { "const": false },
+              "commit": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "confirmationMethod": {
+            "enum": ["oci_revision_label", "git_sha_declaration", "manual_declaration"]
+          }
+        },
+        "required": ["confirmationMethod"]
+      },
+      "then": {
+        "properties": {
+          "status": { "enum": ["declared", "mismatch"] },
+          "causeUse": { "const": "hypothesis_only" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "confirmationMethod": { "const": "none" } },
+        "required": ["confirmationMethod"]
+      },
+      "then": {
+        "properties": {
+          "status": { "const": "unverified" },
+          "causeUse": { "const": "unavailable" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "git": {
+            "properties": { "dirty": { "const": true } },
+            "required": ["dirty"]
+          }
+        },
+        "required": ["git"]
+      },
+      "then": {
+        "properties": {
+          "status": { "const": "mismatch" },
+          "causeUse": { "const": "hypothesis_only" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "mismatch" } },
+        "required": ["status"]
+      },
+      "then": { "properties": { "causeUse": { "const": "hypothesis_only" } } }
+    },
+    {
+      "if": {
+        "properties": { "causeUse": { "enum": ["hypothesis_only", "unavailable"] } },
+        "required": ["causeUse"]
+      },
+      "then": {
+        "properties": {
+          "refs": {
+            "items": { "properties": { "role": { "const": "allowed_ref" } } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "unverified" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "refs": {
+            "items": { "properties": { "role": { "const": "allowed_ref" } } }
+          }
+        }
+      }
+    }
+  ]
+}

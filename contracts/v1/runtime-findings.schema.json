@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Profile findings are data. ruleVersion 0.0.0 is a contract placeholder. This schema does not execute Node.js rules.",
+  "title": "RuntimeFindings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "dataClass",
+    "runId",
+    "profile",
+    "rulesAggregate",
+    "nodejs",
+    "findings"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "RuntimeFindings" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "capabilityLevel", "applicability", "selection"],
+      "properties": {
+        "id": { "enum": ["nodejs", "generic"] },
+        "version": { "const": "g5-contract-1" },
+        "capabilityLevel": {
+          "enum": ["generic_only", "context_only", "rules_available", "telemetry_validated"]
+        },
+        "applicability": { "enum": ["applicable", "not_applicable", "unknown"] },
+        "selection": { "enum": ["explicit", "suggested", "none"] }
+      }
+    },
+    "rulesAggregate": { "$ref": "defs.schema.json#/$defs/runtimeRulesState" },
+    "nodejs": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/nodeContext" }
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "nodeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedVersion", "support", "processRole", "eventLoop", "gc", "memory"],
+      "properties": {
+        "observedVersion": { "$ref": "defs.schema.json#/$defs/nodeVersion" },
+        "support": {
+          "description": "The product's supported LTS line is not chosen in T01.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "line"],
+          "properties": {
+            "status": { "const": "pending_t02" },
+            "line": { "type": "null" }
+          }
+        },
+        "processRole": { "const": "http_server" },
+        "eventLoop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["delay", "utilization"],
+          "properties": {
+            "delay": { "$ref": "defs.schema.json#/$defs/durationSignal" },
+            "utilization": {
+              "description": "Ratio from 0 to 1 when known. missing_signal has no number.",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state"],
+                  "properties": { "state": { "const": "missing_signal" } }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state", "ratio"],
+                  "properties": {
+                    "state": { "const": "known" },
+                    "ratio": { "type": "number", "minimum": 0, "maximum": 1 }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "gc": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state"],
+              "properties": { "state": { "const": "missing_signal" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "pauseNs", "collections"],
+              "properties": {
+                "state": { "const": "known" },
+                "pauseNs": { "type": "integer", "minimum": 0 },
+                "collections": { "type": "integer", "minimum": 0 }
+              }
+            }
+          ]
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "heapUsedBytes",
+            "heapTotalBytes",
+            "rssBytes",
+            "externalBytes",
+            "arrayBuffersBytes",
+            "containerMemoryBytes",
+            "maxOldSpaceSizeBytes",
+            "counterOverlap"
+          ],
+          "properties": {
+            "heapUsedBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "heapTotalBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "rssBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "externalBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "arrayBuffersBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "containerMemoryBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "maxOldSpaceSizeBytes": { "$ref": "defs.schema.json#/$defs/byteSignal" },
+            "counterOverlap": {
+              "description": "arrayBuffers is included in external. Consumers must not add those counters together.",
+              "const": "array_buffers_subset_of_external"
+            }
+          }
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ruleId",
+        "ruleVersion",
+        "evaluation",
+        "severity",
+        "evidenceRefs",
+        "missingSignals",
+        "conclusion",
+        "nextAction"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "ruleId": { "type": "string", "minLength": 1 },
+        "ruleVersion": {
+          "description": "0.0.0 means the rule identifier is reserved by the contract and is not an executed T12 rule.",
+          "const": "0.0.0"
+        },
+        "evaluation": { "enum": ["evaluated", "missing_signal", "not_applicable"] },
+        "severity": { "enum": ["info", "warning"] },
+        "evidenceRefs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missingSignals": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "conclusion": {
+          "description": "not_inferred is required when a signal is missing. There is no healthy or problem_absent conclusion.",
+          "enum": ["not_inferred", "observed", "not_applicable"]
+        },
+        "nextAction": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "evaluation": { "const": "missing_signal" } },
+            "required": ["evaluation"]
+          },
+          "then": {
+            "properties": {
+              "conclusion": { "const": "not_inferred" },
+              "missingSignals": { "minItems": 1 },
+              "evidenceRefs": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "evaluation": { "const": "evaluated" } },
+            "required": ["evaluation"]
+          },
+          "then": {
+            "properties": {
+              "conclusion": { "const": "observed" },
+              "missingSignals": { "maxItems": 0 },
+              "evidenceRefs": { "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "evaluation": { "const": "not_applicable" } },
+            "required": ["evaluation"]
+          },
+          "then": {
+            "properties": {
+              "conclusion": { "const": "not_applicable" },
+              "missingSignals": { "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "profile": { "properties": { "id": { "const": "generic" } }, "required": ["id"] } },
+        "required": ["profile"]
+      },
+      "then": {
+        "properties": {
+          "profile": {
+            "properties": {
+              "capabilityLevel": { "const": "generic_only" },
+              "applicability": { "const": "not_applicable" }
+            }
+          },
+          "rulesAggregate": { "const": "not_applicable" },
+          "nodejs": { "type": "null" },
+          "findings": {
+            "items": { "properties": { "evaluation": { "const": "not_applicable" } } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "profile": { "properties": { "id": { "const": "nodejs" } }, "required": ["id"] } },
+        "required": ["profile"]
+      },
+      "then": {
+        "properties": {
+          "profile": {
+            "properties": {
+              "applicability": { "const": "applicable" },
+              "capabilityLevel": {
+                "enum": ["context_only", "rules_available", "telemetry_validated"]
+              }
+            }
+          },
+          "nodejs": { "type": "object" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "findings": {
+            "contains": {
+              "properties": { "evaluation": { "const": "missing_signal" } },
+              "required": ["evaluation"]
+            }
+          }
+        },
+        "required": ["findings"]
+      },
+      "then": { "properties": { "rulesAggregate": { "const": "missing_signal" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "profile": {
+            "properties": { "capabilityLevel": { "const": "context_only" } },
+            "required": ["capabilityLevel"]
+          }
+        },
+        "required": ["profile"]
+      },
+      "then": {
+        "properties": {
+          "rulesAggregate": { "const": "missing_signal" },
+          "findings": {
+            "not": {
+              "contains": {
+                "properties": { "evaluation": { "const": "evaluated" } },
+                "required": ["evaluation"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "profile": {
+            "properties": { "capabilityLevel": { "const": "rules_available" } },
+            "required": ["capabilityLevel"]
+          }
+        },
+        "required": ["profile"]
+      },
+      "then": {
+        "properties": {
+          "rulesAggregate": { "const": "missing_signal" },
+          "findings": {
+            "contains": {
+              "properties": { "evaluation": { "const": "evaluated" } },
+              "required": ["evaluation"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "profile": {
+            "properties": { "capabilityLevel": { "const": "telemetry_validated" } },
+            "required": ["capabilityLevel"]
+          }
+        },
+        "required": ["profile"]
+      },
+      "then": {
+        "properties": {
+          "rulesAggregate": { "const": "evaluated" },
+          "findings": {
+            "minItems": 1,
+            "contains": {
+              "properties": { "evaluation": { "const": "evaluated" } },
+              "required": ["evaluation"]
+            },
+            "not": {
+              "contains": {
+                "properties": { "evaluation": { "const": "missing_signal" } },
+                "required": ["evaluation"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

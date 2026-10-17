@@ -1,0 +1,655 @@
+{
+  "fixtures": [
+    {
+      "id": "invalid-absent-limit-replay-nonzero",
+      "schema": "analysis.schema.json",
+      "document": "invalid/absent-limit-replay-nonzero.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/replayInputs/cpuLimitCores",
+        "value must be 0"
+      ]
+    },
+    {
+      "id": "invalid-autoscaler-denied-means-absent",
+      "schema": "observations.schema.json",
+      "document": "invalid/autoscaler-denied-means-absent.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/autoscaler/hpa/state",
+        "value must be 'unknown'"
+      ]
+    },
+    {
+      "id": "invalid-cancelled-but-validated",
+      "schema": "analysis.schema.json",
+      "document": "invalid/cancelled-but-validated.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/candidate/state",
+        "value must be 'not_tested'"
+      ]
+    },
+    {
+      "id": "invalid-code-regression-pass-without-noise-policy",
+      "schema": "comparison-result.schema.json",
+      "document": "invalid/code-regression-pass-without-noise-policy.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/budget/outcome",
+        "value must be 'within_budget'"
+      ]
+    },
+    {
+      "id": "invalid-code-regression-resources-differ",
+      "schema": "comparison-result.schema.json",
+      "document": "invalid/code-regression-resources-differ.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/checkedConditions/resources",
+        "value must be 'match'"
+      ]
+    },
+    {
+      "id": "invalid-confidence-level-mismatch",
+      "schema": "analysis.schema.json",
+      "document": "invalid/confidence-level-mismatch.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/evidenceConfidence/score",
+        "want 0.8"
+      ]
+    },
+    {
+      "id": "invalid-confidence-means-safety",
+      "schema": "analysis.schema.json",
+      "document": "invalid/confidence-means-safety.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/evidenceConfidence/meaning",
+        "evidence_volume"
+      ]
+    },
+    {
+      "id": "invalid-cpu-quantity-string",
+      "schema": "analysis.schema.json",
+      "document": "invalid/cpu-quantity-string.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/cpuRequestMilli",
+        "want integer"
+      ]
+    },
+    {
+      "id": "invalid-dry-run-with-failed-slo",
+      "schema": "analysis.schema.json",
+      "document": "invalid/dry-run-with-failed-slo.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/patch/state",
+        "value must be 'not_requested'",
+        "value must be 'passed'"
+      ]
+    },
+    {
+      "id": "invalid-error-rate-as-percent",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/error-rate-as-percent.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/slo/maximumHttpErrorRate",
+        "want 1"
+      ]
+    },
+    {
+      "id": "invalid-gitops-ready-before-validation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/gitops-ready-before-validation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/candidate/state",
+        "value must be 'validated'",
+        "value must be 'review'"
+      ]
+    },
+    {
+      "id": "invalid-manifest-patch-without-dry-run",
+      "schema": "manifest.schema.json",
+      "document": "invalid/manifest-patch-without-dry-run.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/artifacts",
+        "'not' failed"
+      ]
+    },
+    {
+      "id": "invalid-missing-run-id",
+      "schema": "analysis.schema.json",
+      "document": "invalid/missing-run-id.json",
+      "expect": "invalid",
+      "errorContains": [
+        "missing property 'runId'"
+      ]
+    },
+    {
+      "id": "invalid-missing-signal-means-absent",
+      "schema": "runtime-findings.schema.json",
+      "document": "invalid/missing-signal-means-absent.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/findings/0/conclusion",
+        "not_inferred"
+      ]
+    },
+    {
+      "id": "invalid-negative-memory",
+      "schema": "analysis.schema.json",
+      "document": "invalid/negative-memory.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/memoryRequestBytes",
+        "minimum"
+      ]
+    },
+    {
+      "id": "invalid-not-comparable-but-pass",
+      "schema": "comparison-result.schema.json",
+      "document": "invalid/not-comparable-but-pass.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/ciVerdict",
+        "value must be 'not_comparable'"
+      ]
+    },
+    {
+      "id": "invalid-resource-candidate-image-differs",
+      "schema": "comparison-result.schema.json",
+      "document": "invalid/resource-candidate-image-differs.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/checkedConditions/imageDigest",
+        "value must be 'match'"
+      ]
+    },
+    {
+      "id": "invalid-runtime-change-intent",
+      "schema": "comparison-request.schema.json",
+      "document": "invalid/runtime-change-intent.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/intent",
+        "code_regression"
+      ]
+    },
+    {
+      "id": "invalid-secret-field",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/secret-field.json",
+      "expect": "invalid",
+      "errorContains": [
+        "additional properties 'authorization' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-slo-failed-with-recommendation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/slo-failed-with-recommendation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation",
+        "want null"
+      ]
+    },
+    {
+      "id": "invalid-telemetry-validated-with-missing-signal",
+      "schema": "runtime-findings.schema.json",
+      "document": "invalid/telemetry-validated-with-missing-signal.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/findings/0/evaluation",
+        "value must be 'evaluated'"
+      ]
+    },
+    {
+      "id": "invalid-unknown-execution",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-execution.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/execution",
+        "cancelled"
+      ]
+    },
+    {
+      "id": "invalid-unknown-field",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-field.json",
+      "expect": "invalid",
+      "errorContains": [
+        "additional properties 'success' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-unknown-minor-version",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-minor-version.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/schemaVersion",
+        "value must be '1.0.0'"
+      ]
+    },
+    {
+      "id": "invalid-unknown-schema-version",
+      "schema": "analysis.schema.json",
+      "document": "invalid/unknown-schema-version.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/schemaVersion",
+        "value must be '1.0.0'"
+      ]
+    },
+    {
+      "id": "invalid-verified-source-dirty",
+      "schema": "source-context.schema.json",
+      "document": "invalid/verified-source-dirty.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/git/dirty",
+        "value must be false",
+        "mismatch"
+      ]
+    },
+    {
+      "id": "invalid-verified-source-from-oci-label",
+      "schema": "source-context.schema.json",
+      "document": "invalid/verified-source-from-oci-label.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/confirmationMethod",
+        "reproducible_build_record",
+        "hypothesis_only"
+      ]
+    },
+    {
+      "id": "invalid-zero-encodes-missing-signal",
+      "schema": "runtime-findings.schema.json",
+      "document": "invalid/zero-encodes-missing-signal.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/nodejs/eventLoop/delay",
+        "additional properties 'nanoseconds' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-zero-limit-number",
+      "schema": "analysis.schema.json",
+      "document": "invalid/zero-limit-number.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation/cpuLimit",
+        "want object"
+      ]
+    },
+    {
+      "id": "semantic-checks",
+      "schema": "semantic-checks.schema.json",
+      "document": "semantic-checks.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-autoscaler-unknown-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/autoscaler-unknown/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-autoscaler-unknown-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/autoscaler-unknown/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-cancelled-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/cancelled/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-cancelled-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/cancelled/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-cancelled-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/cancelled/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-candidate-rejected-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/candidate-rejected/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-code-change-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/code-change/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-code-change-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/code-change/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-code-change-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/code-change/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-code-change-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/code-change/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-code-change-runtime-findings",
+      "schema": "runtime-findings.schema.json",
+      "document": "valid/code-change/runtime-findings.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-code-change-source-context",
+      "schema": "source-context.schema.json",
+      "document": "valid/code-change/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-code-comparison-request",
+      "schema": "comparison-request.schema.json",
+      "document": "valid/comparison-code/comparison-request.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-code-comparison-result",
+      "schema": "comparison-result.schema.json",
+      "document": "valid/comparison-code/comparison-result.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-not-comparable-comparison-request",
+      "schema": "comparison-request.schema.json",
+      "document": "valid/comparison-not-comparable/comparison-request.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-not-comparable-comparison-result",
+      "schema": "comparison-result.schema.json",
+      "document": "valid/comparison-not-comparable/comparison-result.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-rejected-comparison-request",
+      "schema": "comparison-request.schema.json",
+      "document": "valid/comparison-rejected/comparison-request.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-rejected-comparison-result",
+      "schema": "comparison-result.schema.json",
+      "document": "valid/comparison-rejected/comparison-result.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-resource-comparison-request",
+      "schema": "comparison-request.schema.json",
+      "document": "valid/comparison-resource/comparison-request.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-comparison-resource-comparison-result",
+      "schema": "comparison-result.schema.json",
+      "document": "valid/comparison-resource/comparison-result.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-dry-run-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/dry-run/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-dry-run-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/dry-run/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-dry-run-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/dry-run/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-failed-run-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/failed-run/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-failed-run-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/failed-run/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-failed-run-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/failed-run/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-identity-changed-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/identity-changed/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-identity-changed-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/identity-changed/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-insufficient-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/insufficient/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-insufficient-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/insufficient/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-insufficient-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/insufficient/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-observe-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/observe/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-observe-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/observe/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-report-only-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/report-only/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-report-only-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/report-only/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-report-only-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/report-only/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-report-only-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/report-only/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-report-only-runtime-findings",
+      "schema": "runtime-findings.schema.json",
+      "document": "valid/report-only/runtime-findings.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-report-only-source-context",
+      "schema": "source-context.schema.json",
+      "document": "valid/report-only/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-baseline-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/resource-baseline/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-baseline-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/resource-baseline/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-baseline-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/resource-baseline/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-baseline-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/resource-baseline/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-baseline-runtime-findings",
+      "schema": "runtime-findings.schema.json",
+      "document": "valid/resource-baseline/runtime-findings.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-baseline-source-context",
+      "schema": "source-context.schema.json",
+      "document": "valid/resource-baseline/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-candidate-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/resource-candidate/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-candidate-manifest",
+      "schema": "manifest.schema.json",
+      "document": "valid/resource-candidate/manifest.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-candidate-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/resource-candidate/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-candidate-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/resource-candidate/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-candidate-runtime-findings",
+      "schema": "runtime-findings.schema.json",
+      "document": "valid/resource-candidate/runtime-findings.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-resource-candidate-source-context",
+      "schema": "source-context.schema.json",
+      "document": "valid/resource-candidate/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-runtime-peer-runtime-findings",
+      "schema": "runtime-findings.schema.json",
+      "document": "valid/runtime-peer/runtime-findings.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-slo-failed-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/slo-failed/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-slo-failed-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/slo-failed/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-slo-failed-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/slo-failed/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-source-dirty-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/source-dirty/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-source-dirty-source-context",
+      "schema": "source-context.schema.json",
+      "document": "valid/source-dirty/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-source-unverified-analysis",
+      "schema": "analysis.schema.json",
+      "document": "valid/source-unverified/analysis.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-source-unverified-source-context",
+      "schema": "source-context.schema.json",
+      "document": "valid/source-unverified/source-context.json",
+      "expect": "valid"
+    }
+  ]
+}

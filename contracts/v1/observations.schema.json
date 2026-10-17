@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Identity and metric evidence for one run. Source timestamps are not poll times. Overlapping windows stay in windows[] with disposition discarded; they are not new independent observations.",
+  "title": "Observations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "dataClass",
+    "runId",
+    "workload",
+    "identityStable",
+    "ownerChain",
+    "pods",
+    "serviceMapping",
+    "autoscaler",
+    "load",
+    "windows",
+    "coverage"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "Observations" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "name",
+        "container",
+        "deploymentUid",
+        "deploymentGeneration",
+        "podSelector",
+        "replicas",
+        "image",
+        "stability"
+      ],
+      "properties": {
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+        "container": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "deploymentUid": { "$ref": "defs.schema.json#/$defs/uuid" },
+        "deploymentGeneration": { "type": "integer", "minimum": 1 },
+        "podSelector": { "type": "string", "minLength": 1 },
+        "replicas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desired", "observed"],
+          "properties": {
+            "desired": { "type": "integer", "minimum": 1 },
+            "observed": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reference", "digest"],
+          "properties": {
+            "reference": { "type": "string", "minLength": 1 },
+            "digest": { "$ref": "defs.schema.json#/$defs/imageDigest" }
+          }
+        },
+        "stability": {
+          "description": "Stability is within this run. A different Deployment UID on another run is allowed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deploymentUid", "generation", "imageDigest", "containerRestarted", "replicasFixed"],
+          "properties": {
+            "deploymentUid": { "enum": ["unchanged", "changed"] },
+            "generation": { "enum": ["unchanged", "changed"] },
+            "imageDigest": { "enum": ["unchanged", "changed"] },
+            "containerRestarted": { "type": "boolean" },
+            "replicasFixed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "identityStable": {
+      "description": "False when UID, generation, image, a container restart, or replica count changed during this measurement. False makes the run unfit; it is not by itself the evidence axis.",
+      "type": "boolean"
+    },
+    "ownerChain": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "uid"],
+        "properties": {
+          "kind": { "const": "ReplicaSet" },
+          "name": { "type": "string", "minLength": 1 },
+          "uid": { "$ref": "defs.schema.json#/$defs/uuid" }
+        }
+      }
+    },
+    "pods": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "uid", "ownerUid", "containerId", "imageDigest", "restartCount", "nodeName", "nodeClass"],
+        "properties": {
+          "name": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+          "uid": { "$ref": "defs.schema.json#/$defs/uuid" },
+          "ownerUid": { "$ref": "defs.schema.json#/$defs/uuid" },
+          "containerId": {
+            "description": "Runtime container id. Not a registry credential.",
+            "type": "string",
+            "pattern": "^[a-z0-9]+://[^\\s]+$"
+          },
+          "imageDigest": { "$ref": "defs.schema.json#/$defs/imageDigest" },
+          "restartCount": { "type": "integer", "minimum": 0 },
+          "nodeName": { "type": "string", "minLength": 1 },
+          "nodeClass": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "name"],
+                "properties": {
+                  "state": { "const": "known" },
+                  "name": { "type": "string", "minLength": 1 }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state"],
+                "properties": { "state": { "const": "unknown" } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "serviceMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "serviceName", "routeProof"],
+      "properties": {
+        "status": { "$ref": "defs.schema.json#/$defs/targetState" },
+        "serviceName": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "routeProof": {
+          "description": "endpoint_slice is the only proof that verifies the route. declared_only and none stay unverified.",
+          "enum": ["endpoint_slice", "declared_only", "none"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "verified" } },
+            "required": ["status"]
+          },
+          "then": { "properties": { "routeProof": { "const": "endpoint_slice" } } }
+        },
+        {
+          "if": {
+            "properties": { "routeProof": { "enum": ["declared_only", "none"] } },
+            "required": ["routeProof"]
+          },
+          "then": { "properties": { "status": { "const": "unverified" } } }
+        }
+      ]
+    },
+    "autoscaler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hpa", "vpa"],
+      "properties": {
+        "hpa": { "$ref": "defs.schema.json#/$defs/autoscalerController" },
+        "vpa": { "$ref": "defs.schema.json#/$defs/autoscalerController" }
+      }
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executed",
+        "termination",
+        "requests",
+        "httpErrors",
+        "actualRps",
+        "httpErrorRate",
+        "latency",
+        "usefulThroughputRps",
+        "droppedIterations",
+        "generatorSaturated",
+        "interval"
+      ],
+      "properties": {
+        "executed": { "type": "boolean" },
+        "termination": {
+          "enum": [
+            "duration_elapsed",
+            "context_canceled",
+            "context_deadline_exceeded",
+            "invalid_configuration",
+            "invalid_target",
+            "internal_error",
+            "not_started"
+          ]
+        },
+        "requests": { "type": "integer", "minimum": 0 },
+        "httpErrors": { "type": "integer", "minimum": 0 },
+        "actualRps": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "httpErrorRate": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "defs.schema.json#/$defs/errorRate" }
+          ]
+        },
+        "latency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["semantics", "p50Ns", "p95Ns", "p99Ns"],
+          "properties": {
+            "semantics": {
+              "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
+            },
+            "p50Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" },
+            "p95Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" },
+            "p99Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" }
+          }
+        },
+        "usefulThroughputRps": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "droppedIterations": {
+          "description": "Null until a wrapper reports it. Zero would claim no iterations were dropped.",
+          "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }]
+        },
+        "generatorSaturated": {
+          "oneOf": [{ "type": "null" }, { "type": "boolean" }]
+        },
+        "interval": {
+          "description": "Collector-local start and finish. This is not a Metrics API source window.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["startedAt", "finishedAt", "clock"],
+              "properties": {
+                "startedAt": { "$ref": "defs.schema.json#/$defs/dateTime" },
+                "finishedAt": { "$ref": "defs.schema.json#/$defs/dateTime" },
+                "clock": { "const": "collector_local" }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "requests": { "const": 0 } },
+            "required": ["requests"]
+          },
+          "then": {
+            "properties": {
+              "actualRps": { "type": "null" },
+              "httpErrorRate": { "type": "null" },
+              "usefulThroughputRps": { "type": "null" },
+              "latency": {
+                "properties": {
+                  "p50Ns": { "properties": { "state": { "const": "missing_signal" } } },
+                  "p95Ns": { "properties": { "state": { "const": "missing_signal" } } },
+                  "p99Ns": { "properties": { "state": { "const": "missing_signal" } } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "requests": { "exclusiveMinimum": 0 } },
+            "required": ["requests"]
+          },
+          "then": {
+            "properties": {
+              "actualRps": { "type": "number" },
+              "httpErrorRate": { "type": "number" },
+              "latency": {
+                "properties": {
+                  "p50Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] },
+                  "p95Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] },
+                  "p99Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "executed": { "const": false } },
+            "required": ["executed"]
+          },
+          "then": {
+            "properties": {
+              "termination": { "enum": ["not_started", "context_canceled", "invalid_configuration", "invalid_target"] },
+              "interval": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "sourceTimestamp",
+          "windowNs",
+          "polledAt",
+          "disposition",
+          "discardReason",
+          "cpuMilliMax",
+          "memoryBytesMax",
+          "replayInputs",
+          "replicas"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "sourceTimestamp": { "$ref": "defs.schema.json#/$defs/dateTime" },
+          "windowNs": { "type": "integer", "exclusiveMinimum": 0 },
+          "polledAt": {
+            "description": "Local poll time. Independent evidence uses sourceTimestamp and windowNs, not polledAt.",
+            "$ref": "defs.schema.json#/$defs/dateTime"
+          },
+          "disposition": { "enum": ["accepted", "discarded"] },
+          "discardReason": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "enum": [
+                  "duplicate_poll",
+                  "overlapping_window",
+                  "outside_measured_interval",
+                  "missing_pod",
+                  "identity_changed",
+                  "container_restart",
+                  "conflicting_snapshot"
+                ]
+              }
+            ]
+          },
+          "cpuMilliMax": { "$ref": "defs.schema.json#/$defs/cpuMilli" },
+          "memoryBytesMax": { "$ref": "defs.schema.json#/$defs/memoryBytes" },
+          "replayInputs": {
+            "description": "Float inputs consumed by recommender-core-1. cpuCores is cores, memoryMi is mebibytes. They are not a second canonical unit.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cpuCores", "memoryMi"],
+            "properties": {
+              "cpuCores": { "type": "number", "minimum": 0 },
+              "memoryMi": { "type": "number", "minimum": 0 }
+            }
+          },
+          "replicas": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["podUid", "cpuMilli", "memoryBytes"],
+              "properties": {
+                "podUid": { "$ref": "defs.schema.json#/$defs/uuid" },
+                "cpuMilli": { "$ref": "defs.schema.json#/$defs/cpuMilli" },
+                "memoryBytes": { "$ref": "defs.schema.json#/$defs/memoryBytes" }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "disposition": { "const": "accepted" } },
+              "required": ["disposition"]
+            },
+            "then": { "properties": { "discardReason": { "type": "null" } } }
+          },
+          {
+            "if": {
+              "properties": { "disposition": { "const": "discarded" } },
+              "required": ["disposition"]
+            },
+            "then": { "properties": { "discardReason": { "type": "string" } } }
+          }
+        ]
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedPodUids", "podsWithMetrics", "complete", "independentWindowCount", "discardedWindowCount"],
+      "properties": {
+        "expectedPodUids": {
+          "type": "array",
+          "items": { "$ref": "defs.schema.json#/$defs/uuid" }
+        },
+        "podsWithMetrics": {
+          "type": "array",
+          "items": { "$ref": "defs.schema.json#/$defs/uuid" }
+        },
+        "complete": { "type": "boolean" },
+        "independentWindowCount": { "type": "integer", "minimum": 0 },
+        "discardedWindowCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "workload": {
+            "properties": {
+              "stability": {
+                "anyOf": [
+                  { "properties": { "deploymentUid": { "const": "changed" } }, "required": ["deploymentUid"] },
+                  { "properties": { "generation": { "const": "changed" } }, "required": ["generation"] },
+                  { "properties": { "imageDigest": { "const": "changed" } }, "required": ["imageDigest"] },
+                  { "properties": { "containerRestarted": { "const": true } }, "required": ["containerRestarted"] },
+                  { "properties": { "replicasFixed": { "const": false } }, "required": ["replicasFixed"] }
+                ]
+              }
+            },
+            "required": ["stability"]
+          }
+        },
+        "required": ["workload"]
+      },
+      "then": { "properties": { "identityStable": { "const": false } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "workload": {
+            "properties": {
+              "stability": {
+                "properties": {
+                  "deploymentUid": { "const": "unchanged" },
+                  "generation": { "const": "unchanged" },
+                  "imageDigest": { "const": "unchanged" },
+                  "containerRestarted": { "const": false },
+                  "replicasFixed": { "const": true }
+                },
+                "required": ["deploymentUid", "generation", "imageDigest", "containerRestarted", "replicasFixed"]
+              }
+            },
+            "required": ["stability"]
+          }
+        },
+        "required": ["workload"]
+      },
+      "then": { "properties": { "identityStable": { "const": true } } }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Analysis",
+  "dataClass": "synthetic_fixture",
+  "runId": "44444444-4444-4444-8444-444444444444",
+  "calculationVersion": "recommender-core-1",
+  "policyVersion": "policy-core-1",
+  "execution": "completed",
+  "evidence": "insufficient",
+  "target": "verified",
+  "slo": "passed",
+  "source": "declared",
+  "runtimeRules": "missing_signal",
+  "loadMode": "rps",
+  "environmentRole": "staging",
+  "autoscalerGate": "clear",
+  "candidate": {
+    "state": "not_tested"
+  },
+  "patch": {
+    "state": "not_requested",
+    "purpose": "none"
+  },
+  "gitopsExport": "not_requested",
+  "reasonCodes": [
+    "insufficient_data"
+  ],
+  "limitations": [
+    "missing_signal",
+    "source_declared_not_verified"
+  ],
+  "currentSettings": {
+    "cpuRequestMilli": 100,
+    "memoryRequestBytes": 134217728,
+    "cpuLimit": {
+      "state": "absent"
+    },
+    "memoryLimit": {
+      "state": "set",
+      "memoryBytes": 268435456
+    }
+  },
+  "testedSettings": null,
+  "recommendation": null,
+  "evidenceConfidence": null,
+  "provenance": {
+    "tool": {
+      "name": "pod-rightsizer",
+      "version": "0.0.0-dev"
+    },
+    "metricsSource": "kubernetes-metrics-api",
+    "claimedInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hashMeaning": "content_immutability_not_measurement_truth"
+  },
+  "explanations": [],
+  "diagnostics": null
+}

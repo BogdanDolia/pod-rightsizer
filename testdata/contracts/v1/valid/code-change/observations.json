@@ -1,0 +1,308 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Observations",
+  "dataClass": "synthetic_fixture",
+  "runId": "77777777-7777-4777-8777-777777777777",
+  "workload": {
+    "namespace": "rightsizer-synthetic",
+    "name": "orders-api",
+    "container": "api",
+    "deploymentUid": "bbbbbbbb-aaaa-4aaa-8aaa-bbbbbbbbbbbb",
+    "deploymentGeneration": 7,
+    "podSelector": "app=orders",
+    "replicas": {
+      "desired": 2,
+      "observed": 2
+    },
+    "image": {
+      "reference": "example.invalid/orders-api:synthetic",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "stability": {
+      "deploymentUid": "unchanged",
+      "generation": "unchanged",
+      "imageDigest": "unchanged",
+      "containerRestarted": false,
+      "replicasFixed": true
+    }
+  },
+  "identityStable": true,
+  "ownerChain": [
+    {
+      "kind": "ReplicaSet",
+      "name": "orders-api-synthetic",
+      "uid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    }
+  ],
+  "pods": [
+    {
+      "name": "orders-api-code-a",
+      "uid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+      "ownerUid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "containerId": "containerd://synthetic-orders-api-code-a",
+      "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    },
+    {
+      "name": "orders-api-code-b",
+      "uid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+      "ownerUid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "containerId": "containerd://synthetic-orders-api-code-b",
+      "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    }
+  ],
+  "serviceMapping": {
+    "status": "verified",
+    "serviceName": "orders",
+    "routeProof": "endpoint_slice"
+  },
+  "autoscaler": {
+    "hpa": {
+      "discovery": "read",
+      "state": "absent"
+    },
+    "vpa": {
+      "discovery": "read",
+      "state": "absent"
+    }
+  },
+  "load": {
+    "executed": true,
+    "termination": "duration_elapsed",
+    "requests": 15000,
+    "httpErrors": 12,
+    "actualRps": 50.0,
+    "httpErrorRate": 0.0008,
+    "latency": {
+      "semantics": "until_response_headers",
+      "p50Ns": {
+        "state": "known",
+        "nanoseconds": 20000000
+      },
+      "p95Ns": {
+        "state": "known",
+        "nanoseconds": 80000000
+      },
+      "p99Ns": {
+        "state": "known",
+        "nanoseconds": 120000000
+      }
+    },
+    "usefulThroughputRps": 49.96,
+    "droppedIterations": null,
+    "generatorSaturated": false,
+    "interval": {
+      "startedAt": "2026-10-17T12:00:00Z",
+      "finishedAt": "2026-10-17T12:05:00Z",
+      "clock": "collector_local"
+    }
+  },
+  "windows": [
+    {
+      "id": "w1",
+      "sourceTimestamp": "2026-10-17T12:00:30Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:00:32Z",
+      "disposition": "accepted",
+      "discardReason": null,
+      "cpuMilliMax": 100,
+      "memoryBytesMax": 146800640,
+      "replayInputs": {
+        "cpuCores": 0.1,
+        "memoryMi": 140
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 100,
+          "memoryBytes": 146800640
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 60,
+          "memoryBytes": 145752064
+        }
+      ]
+    },
+    {
+      "id": "w2",
+      "sourceTimestamp": "2026-10-17T12:01:00Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:01:02Z",
+      "disposition": "accepted",
+      "discardReason": null,
+      "cpuMilliMax": 180,
+      "memoryBytesMax": 152043520,
+      "replayInputs": {
+        "cpuCores": 0.18,
+        "memoryMi": 145
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 180,
+          "memoryBytes": 152043520
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 140,
+          "memoryBytes": 150994944
+        }
+      ]
+    },
+    {
+      "id": "w3",
+      "sourceTimestamp": "2026-10-17T12:01:30Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:01:32Z",
+      "disposition": "accepted",
+      "discardReason": null,
+      "cpuMilliMax": 120,
+      "memoryBytesMax": 148897792,
+      "replayInputs": {
+        "cpuCores": 0.12,
+        "memoryMi": 142
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 120,
+          "memoryBytes": 148897792
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 80,
+          "memoryBytes": 147849216
+        }
+      ]
+    },
+    {
+      "id": "w4",
+      "sourceTimestamp": "2026-10-17T12:02:00Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:02:02Z",
+      "disposition": "accepted",
+      "discardReason": null,
+      "cpuMilliMax": 160,
+      "memoryBytesMax": 150994944,
+      "replayInputs": {
+        "cpuCores": 0.16,
+        "memoryMi": 144
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 160,
+          "memoryBytes": 150994944
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 120,
+          "memoryBytes": 149946368
+        }
+      ]
+    },
+    {
+      "id": "w5",
+      "sourceTimestamp": "2026-10-17T12:00:15Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:00:16Z",
+      "disposition": "discarded",
+      "discardReason": "outside_measured_interval",
+      "cpuMilliMax": 90,
+      "memoryBytesMax": 140000000,
+      "replayInputs": {
+        "cpuCores": 0.09,
+        "memoryMi": 133.5
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 90,
+          "memoryBytes": 140000000
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 50,
+          "memoryBytes": 138951424
+        }
+      ]
+    },
+    {
+      "id": "w6",
+      "sourceTimestamp": "2026-10-17T12:00:45Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:00:46Z",
+      "disposition": "discarded",
+      "discardReason": "overlapping_window",
+      "cpuMilliMax": 110,
+      "memoryBytesMax": 147000000,
+      "replayInputs": {
+        "cpuCores": 0.11,
+        "memoryMi": 140.2
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 110,
+          "memoryBytes": 147000000
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 70,
+          "memoryBytes": 145951424
+        }
+      ]
+    },
+    {
+      "id": "w7",
+      "sourceTimestamp": "2026-10-17T12:00:30Z",
+      "windowNs": 30000000000,
+      "polledAt": "2026-10-17T12:00:40Z",
+      "disposition": "discarded",
+      "discardReason": "duplicate_poll",
+      "cpuMilliMax": 100,
+      "memoryBytesMax": 146800640,
+      "replayInputs": {
+        "cpuCores": 0.1,
+        "memoryMi": 140
+      },
+      "replicas": [
+        {
+          "podUid": "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+          "cpuMilli": 100,
+          "memoryBytes": 146800640
+        },
+        {
+          "podUid": "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb",
+          "cpuMilli": 60,
+          "memoryBytes": 145752064
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "expectedPodUids": [
+      "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+      "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb"
+    ],
+    "podsWithMetrics": [
+      "bbbbbbbb-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+      "bbbbbbbb-dddd-4ddd-8ddd-bbbbbbbbbbbb"
+    ],
+    "complete": true,
+    "independentWindowCount": 4,
+    "discardedWindowCount": 3
+  }
+}

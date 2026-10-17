@@ -1,0 +1,914 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Analysis result v1. Axes are independent. JSON Schema enforces the contradictions listed in allOf; it does not recompute SLO, confidence, or the recommendation formula.",
+  "title": "Analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "dataClass",
+    "runId",
+    "calculationVersion",
+    "policyVersion",
+    "execution",
+    "evidence",
+    "target",
+    "slo",
+    "source",
+    "runtimeRules",
+    "loadMode",
+    "environmentRole",
+    "autoscalerGate",
+    "candidate",
+    "patch",
+    "gitopsExport",
+    "reasonCodes",
+    "limitations",
+    "currentSettings",
+    "testedSettings",
+    "recommendation",
+    "evidenceConfidence",
+    "provenance",
+    "explanations",
+    "diagnostics"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "defs.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "Analysis" },
+    "dataClass": { "$ref": "defs.schema.json#/$defs/dataClass" },
+    "runId": { "$ref": "defs.schema.json#/$defs/uuid" },
+    "calculationVersion": { "const": "recommender-core-1" },
+    "policyVersion": { "const": "policy-core-1" },
+    "execution": { "$ref": "defs.schema.json#/$defs/execution" },
+    "evidence": { "$ref": "defs.schema.json#/$defs/evidenceState" },
+    "target": { "$ref": "defs.schema.json#/$defs/targetState" },
+    "slo": { "$ref": "defs.schema.json#/$defs/sloState" },
+    "source": { "$ref": "defs.schema.json#/$defs/sourceState" },
+    "runtimeRules": { "$ref": "defs.schema.json#/$defs/runtimeRulesState" },
+    "loadMode": { "$ref": "defs.schema.json#/$defs/loadMode" },
+    "environmentRole": { "$ref": "defs.schema.json#/$defs/environmentRole" },
+    "autoscalerGate": { "$ref": "defs.schema.json#/$defs/autoscalerGate" },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "patch": { "$ref": "#/$defs/patch" },
+    "gitopsExport": { "$ref": "defs.schema.json#/$defs/gitopsExport" },
+    "reasonCodes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "defs.schema.json#/$defs/reasonCode" }
+    },
+    "limitations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "defs.schema.json#/$defs/limitationCode" }
+    },
+    "currentSettings": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "defs.schema.json#/$defs/resourceSetting" }
+      ]
+    },
+    "testedSettings": {
+      "description": "Settings that were deployed for a candidate run. They are not the recommendation calculated from that run.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "cpuRequestMilli", "memoryRequestBytes", "cpuLimit", "memoryLimit"],
+          "properties": {
+            "role": { "const": "resource_candidate_under_test" },
+            "cpuRequestMilli": { "type": "integer", "minimum": 1 },
+            "memoryRequestBytes": { "$ref": "defs.schema.json#/$defs/roundedMemoryBytes" },
+            "cpuLimit": { "$ref": "defs.schema.json#/$defs/recommendedCpuLimit" },
+            "memoryLimit": { "$ref": "defs.schema.json#/$defs/recommendedMemoryLimit" }
+          }
+        }
+      ]
+    },
+    "recommendation": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/recommendation" }
+      ]
+    },
+    "evidenceConfidence": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "defs.schema.json#/$defs/evidenceConfidence" }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "metricsSource", "claimedInputsSha256", "hashMeaning"],
+      "properties": {
+        "tool": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "pod-rightsizer" },
+            "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-.][0-9A-Za-z.]+)?$" }
+          }
+        },
+        "metricsSource": { "enum": ["kubernetes-metrics-api", "none"] },
+        "claimedInputsSha256": { "$ref": "defs.schema.json#/$defs/sha256" },
+        "hashMeaning": { "$ref": "defs.schema.json#/$defs/hashMeaning" }
+      }
+    },
+    "explanations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "diagnostics": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "message"],
+          "properties": {
+            "available": { "const": true },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "$ref": "defs.schema.json#/$defs/candidateState" },
+        "baselineRunId": { "$ref": "defs.schema.json#/$defs/uuid" },
+        "candidateRunId": { "$ref": "defs.schema.json#/$defs/uuid" },
+        "comparisonId": { "$ref": "defs.schema.json#/$defs/uuid" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "not_tested" } },
+            "required": ["state"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["baselineRunId"] },
+                { "required": ["candidateRunId"] },
+                { "required": ["comparisonId"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "enum": ["validated", "rejected"] } },
+            "required": ["state"]
+          },
+          "then": { "required": ["baselineRunId", "candidateRunId", "comparisonId"] }
+        }
+      ]
+    },
+    "patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "purpose"],
+      "properties": {
+        "state": { "$ref": "defs.schema.json#/$defs/patchState" },
+        "purpose": { "$ref": "defs.schema.json#/$defs/patchPurpose" },
+        "admissionMeaning": { "const": "api_admission_only" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "not_requested" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": { "purpose": { "const": "none" } },
+            "not": { "required": ["admissionMeaning"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "dry_run_passed" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": { "purpose": { "enum": ["experimental", "review"] } },
+            "required": ["admissionMeaning"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "failed" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": { "purpose": { "enum": ["experimental", "review"] } },
+            "not": { "required": ["admissionMeaning"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "purpose": { "const": "none" } },
+            "required": ["purpose"]
+          },
+          "then": { "properties": { "state": { "const": "not_requested" } } }
+        },
+        {
+          "if": {
+            "properties": { "purpose": { "const": "review" } },
+            "required": ["purpose"]
+          },
+          "then": { "properties": { "state": { "enum": ["dry_run_passed", "failed"] } } }
+        }
+      ]
+    },
+    "knownLimit": {
+      "description": "Limit used beside a recommendation. unknown is not allowed here.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "absent" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "cpuMilli"],
+          "properties": {
+            "state": { "const": "set" },
+            "cpuMilli": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuRequestMilli",
+        "memoryRequestBytes",
+        "cpuLimit",
+        "memoryLimit",
+        "rounding",
+        "replayInputs",
+        "comparison"
+      ],
+      "properties": {
+        "cpuRequestMilli": { "type": "integer", "minimum": 10 },
+        "memoryRequestBytes": {
+          "type": "integer",
+          "minimum": 33554432,
+          "multipleOf": 1048576
+        },
+        "cpuLimit": { "$ref": "defs.schema.json#/$defs/recommendedCpuLimit" },
+        "memoryLimit": { "$ref": "defs.schema.json#/$defs/recommendedMemoryLimit" },
+        "rounding": { "const": "ceil_to_millicore_and_mebibyte" },
+        "replayInputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["calculationVersion", "cpuRequestCores", "cpuLimitCores", "memoryRequestMi", "memoryLimitMi"],
+          "properties": {
+            "calculationVersion": { "const": "recommender-core-1" },
+            "cpuRequestCores": { "type": "number", "exclusiveMinimum": 0 },
+            "cpuLimitCores": {
+              "description": "Legacy core field. Zero means the limit is absent for recommender-core-1 only. The authoritative field is cpuLimit.state.",
+              "type": "number",
+              "minimum": 0
+            },
+            "memoryRequestMi": { "type": "number", "exclusiveMinimum": 0 },
+            "memoryLimitMi": { "type": "number", "minimum": 0 }
+          }
+        },
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpuRequest", "memoryRequest", "cpuLimit", "memoryLimit"],
+          "properties": {
+            "cpuRequest": { "$ref": "#/$defs/milliDelta" },
+            "memoryRequest": { "$ref": "#/$defs/byteDelta" },
+            "cpuLimit": { "$ref": "#/$defs/limitDelta" },
+            "memoryLimit": { "$ref": "#/$defs/limitDelta" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "cpuLimit": {
+                "properties": { "state": { "const": "absent" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["cpuLimit"]
+          },
+          "then": {
+            "properties": {
+              "replayInputs": { "properties": { "cpuLimitCores": { "const": 0 } } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "cpuLimit": {
+                "properties": { "state": { "const": "set" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["cpuLimit"]
+          },
+          "then": {
+            "properties": {
+              "replayInputs": { "properties": { "cpuLimitCores": { "exclusiveMinimum": 0 } } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "memoryLimit": {
+                "properties": { "state": { "const": "absent" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["memoryLimit"]
+          },
+          "then": {
+            "properties": {
+              "replayInputs": { "properties": { "memoryLimitMi": { "const": 0 } } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "memoryLimit": {
+                "properties": { "state": { "const": "set" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["memoryLimit"]
+          },
+          "then": {
+            "properties": {
+              "replayInputs": { "properties": { "memoryLimitMi": { "exclusiveMinimum": 0 } } }
+            }
+          }
+        }
+      ]
+    },
+    "milliDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currentMilli", "recommendedMilli", "deltaMilli", "direction"],
+      "properties": {
+        "currentMilli": { "type": "integer", "minimum": 0 },
+        "recommendedMilli": { "type": "integer", "minimum": 0 },
+        "deltaMilli": { "type": "integer" },
+        "direction": { "enum": ["increase", "decrease", "unchanged"] }
+      }
+    },
+    "byteDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currentBytes", "recommendedBytes", "deltaBytes", "direction"],
+      "properties": {
+        "currentBytes": { "type": "integer", "minimum": 0 },
+        "recommendedBytes": { "type": "integer", "minimum": 0 },
+        "deltaBytes": { "type": "integer" },
+        "direction": { "enum": ["increase", "decrease", "unchanged"] }
+      }
+    },
+    "limitDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "recommended", "direction"],
+      "properties": {
+        "current": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state"],
+              "properties": { "state": { "const": "absent" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "cpuMilli"],
+              "properties": {
+                "state": { "const": "set" },
+                "cpuMilli": { "type": "integer", "minimum": 1 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "memoryBytes"],
+              "properties": {
+                "state": { "const": "set" },
+                "memoryBytes": { "type": "integer", "minimum": 1 }
+              }
+            }
+          ]
+        },
+        "recommended": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state"],
+              "properties": { "state": { "const": "absent" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "cpuMilli"],
+              "properties": {
+                "state": { "const": "set" },
+                "cpuMilli": { "type": "integer", "minimum": 1 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "memoryBytes"],
+              "properties": {
+                "state": { "const": "set" },
+                "memoryBytes": { "type": "integer", "minimum": 1 }
+              }
+            }
+          ]
+        },
+        "direction": { "enum": ["increase", "decrease", "unchanged"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "execution": { "enum": ["failed", "cancelled"] } },
+        "required": ["execution"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": { "type": "null" },
+          "evidenceConfidence": { "type": "null" },
+          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "patch": {
+            "properties": {
+              "state": { "const": "not_requested" },
+              "purpose": { "const": "none" }
+            }
+          },
+          "gitopsExport": { "const": "not_requested" },
+          "diagnostics": { "type": "object" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "execution": { "const": "completed" } },
+        "required": ["execution"]
+      },
+      "then": { "properties": { "diagnostics": { "type": "null" } } }
+    },
+    {
+      "if": {
+        "properties": { "execution": { "const": "cancelled" } },
+        "required": ["execution"]
+      },
+      "then": {
+        "properties": {
+          "slo": { "const": "not_evaluated" },
+          "reasonCodes": { "contains": { "const": "cancelled" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "execution": { "const": "failed" } },
+        "required": ["execution"]
+      },
+      "then": {
+        "properties": { "reasonCodes": { "contains": { "const": "run_failed" } } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidence": { "const": "insufficient" } },
+        "required": ["evidence"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": { "type": "null" },
+          "evidenceConfidence": { "type": "null" },
+          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "patch": { "properties": { "state": { "const": "not_requested" } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "insufficient_data" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidence": { "const": "invalid" } },
+        "required": ["evidence"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": { "type": "null" },
+          "evidenceConfidence": { "type": "null" },
+          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "patch": { "properties": { "state": { "const": "not_requested" } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "evidence_invalid" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "slo": { "const": "failed" } },
+        "required": ["slo"]
+      },
+      "then": {
+        "properties": {
+          "recommendation": { "type": "null" },
+          "evidenceConfidence": { "type": "null" },
+          "candidate": { "properties": { "state": { "enum": ["not_tested", "rejected"] } } },
+          "patch": { "properties": { "state": { "const": "not_requested" } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "slo_failed" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "recommendation": { "type": "object" } },
+        "required": ["recommendation"]
+      },
+      "then": {
+        "properties": {
+          "execution": { "const": "completed" },
+          "evidence": { "const": "valid" },
+          "evidenceConfidence": { "type": "object" },
+          "currentSettings": { "type": "object" },
+          "explanations": { "minItems": 1 }
+        },
+        "anyOf": [
+          { "properties": { "slo": { "const": "passed" } } },
+          {
+            "properties": {
+              "slo": { "const": "not_evaluated" },
+              "loadMode": { "const": "observe" }
+            },
+            "required": ["slo", "loadMode"]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "recommendation": { "type": "null" } },
+        "required": ["recommendation"]
+      },
+      "then": { "properties": { "evidenceConfidence": { "type": "null" } } }
+    },
+    {
+      "if": {
+        "properties": { "evidenceConfidence": { "type": "object" } },
+        "required": ["evidenceConfidence"]
+      },
+      "then": {
+        "properties": {
+          "limitations": { "contains": { "const": "confidence_is_evidence_volume" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "target": { "const": "unverified" } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "candidate": { "properties": { "state": { "not": { "const": "validated" } } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "target_unverified" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "target": { "const": "mismatch" } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "candidate": { "properties": { "state": { "not": { "const": "validated" } } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "target_mismatch" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "source": { "const": "mismatch" } },
+        "required": ["source"]
+      },
+      "then": {
+        "properties": {
+          "candidate": { "properties": { "state": { "not": { "const": "validated" } } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "source_mismatch" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "source": { "const": "unverified" } },
+        "required": ["source"]
+      },
+      "then": {
+        "properties": {
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "source_unverified" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "source": { "const": "declared" } },
+        "required": ["source"]
+      },
+      "then": {
+        "properties": {
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "limitations": { "contains": { "const": "source_declared_not_verified" } }
+        },
+        "not": {
+          "properties": { "reasonCodes": { "contains": { "const": "source_unverified" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "source": { "const": "verified" } },
+        "required": ["source"]
+      },
+      "then": {
+        "allOf": [
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "source_unverified" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "source_mismatch" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "source_dirty" } } } } },
+          { "not": { "properties": { "limitations": { "contains": { "const": "source_declared_not_verified" } } } } }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "reasonCodes": { "contains": { "const": "source_dirty" } } },
+        "required": ["reasonCodes"]
+      },
+      "then": { "properties": { "source": { "const": "mismatch" } } }
+    },
+    {
+      "if": {
+        "properties": { "reasonCodes": { "contains": { "const": "identity_changed" } } },
+        "required": ["reasonCodes"]
+      },
+      "then": { "properties": { "evidence": { "const": "invalid" } } }
+    },
+    {
+      "if": {
+        "properties": { "autoscalerGate": { "const": "unknown" } },
+        "required": ["autoscalerGate"]
+      },
+      "then": {
+        "properties": {
+          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "autoscaler_unknown" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "autoscalerGate": { "const": "present" } },
+        "required": ["autoscalerGate"]
+      },
+      "then": {
+        "properties": {
+          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "autoscaler_present" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "runtimeRules": { "const": "missing_signal" } },
+        "required": ["runtimeRules"]
+      },
+      "then": {
+        "properties": { "limitations": { "contains": { "const": "missing_signal" } } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "loadMode": { "const": "observe" } },
+        "required": ["loadMode"]
+      },
+      "then": {
+        "properties": {
+          "slo": { "const": "not_evaluated" },
+          "candidate": { "properties": { "state": { "const": "not_tested" } } },
+          "patch": { "properties": { "state": { "const": "not_requested" } } },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "loadMode": { "const": "observe" },
+          "recommendation": { "type": "object" }
+        },
+        "required": ["loadMode", "recommendation"]
+      },
+      "then": {
+        "properties": { "limitations": { "contains": { "const": "observe_without_slo" } } }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "patch": {
+            "properties": {
+              "state": { "const": "dry_run_passed" },
+              "purpose": { "const": "experimental" }
+            },
+            "required": ["state", "purpose"]
+          }
+        },
+        "required": ["patch"]
+      },
+      "then": {
+        "properties": {
+          "execution": { "const": "completed" },
+          "evidence": { "const": "valid" },
+          "slo": { "const": "passed" },
+          "recommendation": { "type": "object" },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "candidate": { "properties": { "state": { "enum": ["not_tested", "validated"] } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "patch": {
+            "properties": { "purpose": { "const": "experimental" } },
+            "required": ["purpose"]
+          },
+          "candidate": {
+            "properties": { "state": { "const": "not_tested" } },
+            "required": ["state"]
+          }
+        },
+        "required": ["patch", "candidate"]
+      },
+      "then": {
+        "properties": {
+          "limitations": { "contains": { "const": "experimental_patch_not_a_candidate_test" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "patch": {
+            "properties": { "purpose": { "const": "review" } },
+            "required": ["purpose"]
+          }
+        },
+        "required": ["patch"]
+      },
+      "then": { "properties": { "candidate": { "properties": { "state": { "const": "validated" } } } } }
+    },
+    {
+      "if": {
+        "properties": { "patch": { "properties": { "state": { "const": "failed" } }, "required": ["state"] } },
+        "required": ["patch"]
+      },
+      "then": {
+        "properties": {
+          "execution": { "const": "completed" },
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "patch_validation_failed" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "candidate": { "properties": { "state": { "enum": ["validated", "rejected"] } }, "required": ["state"] } },
+        "required": ["candidate"]
+      },
+      "then": { "properties": { "testedSettings": { "type": "object" } } }
+    },
+    {
+      "if": {
+        "properties": { "candidate": { "properties": { "state": { "const": "not_tested" } }, "required": ["state"] } },
+        "required": ["candidate"]
+      },
+      "then": { "properties": { "testedSettings": { "type": "null" } } }
+    },
+    {
+      "if": {
+        "properties": { "candidate": { "properties": { "state": { "const": "validated" } }, "required": ["state"] } },
+        "required": ["candidate"]
+      },
+      "then": {
+        "properties": {
+          "execution": { "const": "completed" },
+          "evidence": { "const": "valid" },
+          "slo": { "const": "passed" },
+          "target": { "const": "verified" },
+          "source": { "enum": ["verified", "declared", "unverified"] },
+          "autoscalerGate": { "const": "clear" },
+          "environmentRole": { "const": "staging" },
+          "loadMode": { "enum": ["rps", "concurrency"] }
+        },
+        "allOf": [
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "insufficient_data" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "slo_failed" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "target_unverified" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "target_mismatch" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "identity_changed" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "source_mismatch" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "source_dirty" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "policy_blocked" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "cancelled" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "run_failed" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "autoscaler_unknown" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "autoscaler_present" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "candidate_rejected" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "evidence_invalid" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "freshness_expired" } } } } },
+          { "not": { "properties": { "reasonCodes": { "contains": { "const": "not_comparable" } } } } }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "candidate": { "properties": { "state": { "const": "rejected" } }, "required": ["state"] } },
+        "required": ["candidate"]
+      },
+      "then": {
+        "properties": {
+          "gitopsExport": { "enum": ["not_requested", "blocked"] },
+          "reasonCodes": { "contains": { "const": "candidate_rejected" } }
+        },
+        "anyOf": [
+          { "properties": { "slo": { "const": "failed" } } },
+          { "properties": { "evidence": { "enum": ["insufficient", "invalid"] } } }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "gitopsExport": { "const": "ready" } },
+        "required": ["gitopsExport"]
+      },
+      "then": {
+        "properties": {
+          "execution": { "const": "completed" },
+          "evidence": { "const": "valid" },
+          "slo": { "const": "passed" },
+          "target": { "const": "verified" },
+          "source": { "const": "verified" },
+          "autoscalerGate": { "const": "clear" },
+          "environmentRole": { "const": "staging" },
+          "candidate": { "properties": { "state": { "const": "validated" } } },
+          "patch": {
+            "properties": {
+              "state": { "const": "dry_run_passed" },
+              "purpose": { "const": "review" },
+              "admissionMeaning": { "const": "api_admission_only" }
+            },
+            "required": ["state", "purpose", "admissionMeaning"]
+          },
+          "reasonCodes": { "maxItems": 0 }
+        }
+      }
+    }
+  ]
+}

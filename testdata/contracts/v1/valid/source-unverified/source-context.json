@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "SourceContext",
+  "dataClass": "synthetic_fixture",
+  "runId": "abababab-abab-4aba-8aba-abababababab",
+  "status": "unverified",
+  "confirmationMethod": "none",
+  "causeUse": "unavailable",
+  "logicalService": {
+    "name": "orders",
+    "appRoot": "services/orders",
+    "mapping": "explicit"
+  },
+  "image": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tag": "synthetic"
+  },
+  "git": {
+    "commit": null,
+    "dirty": false,
+    "dirtyPaths": []
+  },
+  "refs": []
+}

@@ -3,7 +3,7 @@ module github.com/BogdanDolia/pod-rightsizer
 go 1.25.0
 
 require (
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.6.0
 	k8s.io/api v0.28.4
 	k8s.io/apimachinery v0.28.4
 	k8s.io/client-go v0.28.4

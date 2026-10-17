@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
+	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
 )
 
 // ResourceMetrics represents a point-in-time metrics collection

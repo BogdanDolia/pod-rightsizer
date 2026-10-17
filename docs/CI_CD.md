@@ -1,6 +1,6 @@
 # CI/CD and contribution workflow
 
-The workflow follows [tsastat](https://github.com/BogdanDolia/tsastat/tree/26800ac500ed60f254e1c24f4f5f368e2d289ad5/.github/workflows): PR checks, a Go compatibility matrix, GoReleaser snapshots, tag-based releases, weekly dependency updates, and a separate static GitHub Pages deployment. Pod Rightsizer retains its Kubernetes integration checks and packages both commands.
+The workflow follows [tsastat](https://github.com/HelixThinker/tsastat/tree/26800ac500ed60f254e1c24f4f5f368e2d289ad5/.github/workflows): PR checks, a Go compatibility matrix, GoReleaser snapshots, tag-based releases, weekly dependency updates, and a separate static GitHub Pages deployment. Pod Rightsizer retains its Kubernetes integration checks and packages both commands.
 
 ## Branches and pull requests
 
@@ -64,7 +64,7 @@ The smoke check starts only the extracted API binary and requests its static UI.
 
 The buildless site lives in `site/`. `.github/workflows/pages.yml` validates and publishes it after relevant changes reach `main`, or on manual dispatch. The `github-pages` environment is restricted to deployment from `main`. GitHub Pages must use GitHub Actions as its build source.
 
-The expected project URL is [bogdandolia.github.io/pod-rightsizer](https://bogdandolia.github.io/pod-rightsizer/). Deployment waits for the workflow to be present on `main`. The public site uses sample data and has no connection to the Advisor API or any cluster.
+The expected project URL is [helixthinker.github.io/pod-rightsizer](https://helixthinker.github.io/pod-rightsizer/). Deployment waits for the workflow to be present on `main`. The public site uses sample data and has no connection to the Advisor API or any cluster.
 
 Local checks and preview:
 

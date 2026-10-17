@@ -1,8 +1,8 @@
 package knowledge
 
 import (
-	coremetrics "github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	coremetrics "github.com/HelixThinker/pod-rightsizer/pkg/metrics"
+	"github.com/HelixThinker/pod-rightsizer/pkg/recommender"
 )
 
 // Evaluate returns a list of best-practices suggestions based on collected samples and recommendations.

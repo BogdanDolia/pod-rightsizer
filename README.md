@@ -1,12 +1,12 @@
 # Pod Rightsizer
 
-[![CI](https://github.com/BogdanDolia/pod-rightsizer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BogdanDolia/pod-rightsizer/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/BogdanDolia/pod-rightsizer)](https://github.com/BogdanDolia/pod-rightsizer/releases)
-[![Website](https://img.shields.io/badge/website-GitHub%20Pages-167966)](https://bogdandolia.github.io/pod-rightsizer/)
+[![CI](https://github.com/HelixThinker/pod-rightsizer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HelixThinker/pod-rightsizer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/HelixThinker/pod-rightsizer)](https://github.com/HelixThinker/pod-rightsizer/releases)
+[![Website](https://img.shields.io/badge/website-GitHub%20Pages-167966)](https://helixthinker.github.io/pod-rightsizer/)
 
 Pod Rightsizer measures one container in a Kubernetes Deployment during a load test and recommends auditable CPU and memory requests/limits.
 
-[Project website](https://bogdandolia.github.io/pod-rightsizer/) · [CI/CD and contribution workflow](docs/CI_CD.md)
+[Project website](https://helixthinker.github.io/pod-rightsizer/) · [CI/CD and contribution workflow](docs/CI_CD.md)
 
 ## How recommendations are calculated
 
@@ -27,7 +27,7 @@ The default CPU limit policy is `none` to avoid CPU throttling. The default memo
 Go 1.25 or newer is required.
 
 ```bash
-git clone https://github.com/BogdanDolia/pod-rightsizer.git
+git clone https://github.com/HelixThinker/pod-rightsizer.git
 cd pod-rightsizer
 go build -o pod-rightsizer ./cmd/pod-rightsizer
 ```

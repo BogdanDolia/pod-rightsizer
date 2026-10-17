@@ -1,4 +1,4 @@
-module github.com/BogdanDolia/pod-rightsizer
+module github.com/HelixThinker/pod-rightsizer
 
 go 1.25.0
 

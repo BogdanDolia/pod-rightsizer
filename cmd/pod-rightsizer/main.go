@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/output"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
+	"github.com/HelixThinker/pod-rightsizer/pkg/loadtest"
+	"github.com/HelixThinker/pod-rightsizer/pkg/metrics"
+	"github.com/HelixThinker/pod-rightsizer/pkg/output"
+	"github.com/HelixThinker/pod-rightsizer/pkg/recommender"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 )
 

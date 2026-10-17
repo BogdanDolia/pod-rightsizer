@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/loadtest"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/metrics"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
+	"github.com/HelixThinker/pod-rightsizer/pkg/loadtest"
+	"github.com/HelixThinker/pod-rightsizer/pkg/metrics"
+	"github.com/HelixThinker/pod-rightsizer/pkg/recommender"
 )
 
 // Result contains all data to be presented in the output

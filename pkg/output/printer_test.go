@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BogdanDolia/pod-rightsizer/pkg/kubernetes"
-	"github.com/BogdanDolia/pod-rightsizer/pkg/recommender"
+	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
+	"github.com/HelixThinker/pod-rightsizer/pkg/recommender"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"

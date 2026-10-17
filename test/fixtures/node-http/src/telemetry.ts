@@ -16,16 +16,20 @@ export interface DelayHistogramView {
   percentile(percentile: number): number;
 }
 
+type OldSpaceState = "known" | "unset" | "invalid" | "missing_signal";
+type OldSpaceSource = "process.execArgv" | "NODE_OPTIONS" | "absent";
+
 interface OldSpaceFlag {
-  state: "known" | "unset" | "invalid";
+  state: OldSpaceState;
   flag: string;
-  source: "process.execArgv" | "absent";
+  source: OldSpaceSource;
   unit?: "mebibytes" | "percent";
   value?: number;
   bytes?: number;
   byteConversion?: "mebibytes * 1048576";
   appliesTo: "v8_old_space";
   notContainerMemory: true;
+  v8ZeroMeansDefault?: true;
   reason?: string;
 }
 
@@ -92,61 +96,240 @@ export function formatEventLoopDelay(histogram: DelayHistogramView, window: {
   };
 }
 
-function readFlag(argv: readonly string[], name: string): string | undefined {
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === undefined) {
+const OLD_SPACE_PRECEDENCE =
+  "Node.js 24.22.0 applies NODE_OPTIONS before command-line options. The last value of one single-value flag wins, and dash and underscore spellings are the same flag. --max-old-space-size-percentage takes precedence over --max-old-space-size when both are set, in either order. The percentage is not converted to bytes. Neither setting is copied from v8HeapSizeLimit.";
+
+const SUPPORTED_OLD_SPACE_FLAGS = ["max-old-space-size", "max-old-space-size-percentage"] as const;
+type SupportedOldSpaceFlag = (typeof SUPPORTED_OLD_SPACE_FLAGS)[number];
+
+export interface OldSpaceSources {
+  execArgv: readonly string[];
+  nodeOptions?: string | undefined;
+}
+
+export type NodeOptionsParse =
+  | { ok: true; tokens: string[] }
+  | { ok: false; reason: "node_options_unterminated_quote" | "node_options_invalid_escape" };
+
+interface SeenFlag {
+  source: Exclude<OldSpaceSource, "absent">;
+  rawValue: string | null;
+}
+
+export function parseNodeOptions(input: string): NodeOptionsParse {
+  const tokens: string[] = [];
+  let current = "";
+  let inString = false;
+  let started = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (character === undefined) {
       continue;
     }
-    if (arg === name) {
-      return argv[index + 1];
+    if (character === "\\" && inString) {
+      const escaped = input[index + 1];
+      if (escaped === undefined) {
+        return { ok: false, reason: "node_options_invalid_escape" };
+      }
+      current += escaped;
+      started = true;
+      index += 1;
+      continue;
     }
-    if (arg.startsWith(`${name}=`)) {
-      return arg.slice(name.length + 1);
+    if (character === " " && !inString) {
+      if (started) {
+        tokens.push(current);
+        current = "";
+        started = false;
+      }
+      continue;
     }
+    if (character === '"') {
+      inString = !inString;
+      continue;
+    }
+    current += character;
+    started = true;
   }
-  return undefined;
+  if (inString) {
+    return { ok: false, reason: "node_options_unterminated_quote" };
+  }
+  if (started) {
+    tokens.push(current);
+  }
+  return { ok: true, tokens };
 }
 
-function readPositiveIntegerFlag(argv: readonly string[], flag: string, unit: "mebibytes" | "percent"): OldSpaceFlag {
-  const raw = readFlag(argv, flag);
-  if (raw === undefined) {
-    return { state: "unset", flag, source: "absent", appliesTo: "v8_old_space", notContainerMemory: true };
-  }
-  if (!/^[1-9]\d*$/.test(raw)) {
-    return {
-      state: "invalid",
-      flag,
-      source: "process.execArgv",
-      appliesTo: "v8_old_space",
-      notContainerMemory: true,
-      reason: "not_a_positive_integer",
-    };
-  }
-  const value = Number(raw);
-  const known: OldSpaceFlag = {
-    state: "known",
+function absentFlag(flag: string): OldSpaceFlag {
+  return { state: "unset", flag, source: "absent", appliesTo: "v8_old_space", notContainerMemory: true };
+}
+
+function unparsedFlag(flag: string, reason: string): OldSpaceFlag {
+  return {
+    state: "missing_signal",
     flag,
-    source: "process.execArgv",
-    unit,
-    value,
+    source: "NODE_OPTIONS",
     appliesTo: "v8_old_space",
     notContainerMemory: true,
+    reason,
   };
-  if (unit === "mebibytes") {
-    known.bytes = value * 1024 * 1024;
-    known.byteConversion = "mebibytes * 1048576";
-  }
-  return known;
 }
 
-export function readOldSpace(argv: readonly string[]): Record<string, unknown> {
-  const maxOldSpaceSize = readPositiveIntegerFlag(argv, "--max-old-space-size", "mebibytes");
-  const maxOldSpaceSizePercentage = readPositiveIntegerFlag(argv, "--max-old-space-size-percentage", "percent");
+function baseFlag(flag: string, source: OldSpaceSource, state: OldSpaceState, reason?: string): OldSpaceFlag {
+  return {
+    state,
+    flag,
+    source,
+    appliesTo: "v8_old_space",
+    notContainerMemory: true,
+    ...(reason === undefined ? {} : { reason }),
+  };
+}
+
+function parseMebibytes(raw: string): { state: "known"; value: number; v8ZeroMeansDefault?: true } | { state: "invalid" | "missing_signal"; reason: string } {
+  if (raw.length === 0) {
+    return { state: "invalid", reason: "empty_value" };
+  }
+  // Node 24.22.0 accepts an optional leading space and plus, then decimal digits.
+  // A separated argv token is not a value for this flag. 0 selects V8's default.
+  if (!/^ *\+?\d+$/.test(raw)) {
+    return { state: "missing_signal", reason: "unsupported_numeric_syntax" };
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return { state: "missing_signal", reason: "unsupported_numeric_syntax" };
+  }
+  if (value === 0) {
+    return { state: "known", value: 0, v8ZeroMeansDefault: true };
+  }
+  return { state: "known", value };
+}
+
+function parsePercentage(raw: string): { state: "known"; value: number } | { state: "invalid" | "missing_signal"; reason: string } {
+  if (raw.length === 0) {
+    return { state: "invalid", reason: "empty_value" };
+  }
+  const decimal = /^ *\+?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+  const hexadecimal = /^ *0[xX][0-9a-fA-F]+$/;
+  if (!decimal.test(raw) && !hexadecimal.test(raw)) {
+    return { state: "missing_signal", reason: "unsupported_numeric_syntax" };
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return { state: "missing_signal", reason: "unsupported_numeric_syntax" };
+  }
+  if (value <= 0 || value > 100) {
+    return { state: "invalid", reason: "percentage_out_of_range" };
+  }
+  return { state: "known", value };
+}
+
+function absorbFlags(tokens: readonly string[], source: Exclude<OldSpaceSource, "absent">, seen: Map<SupportedOldSpaceFlag, SeenFlag>): void {
+  for (const token of tokens) {
+    if (!token.startsWith("--")) {
+      continue;
+    }
+    const body = token.slice(2);
+    const equals = body.indexOf("=");
+    const rawName = equals === -1 ? body : body.slice(0, equals);
+    const canonical = rawName.replaceAll("_", "-");
+    if (canonical !== "max-old-space-size" && canonical !== "max-old-space-size-percentage") {
+      continue;
+    }
+    // Node 24.22.0 does not accept the next argv element as the value.
+    seen.set(canonical, { source, rawValue: equals === -1 ? null : body.slice(equals + 1) });
+  }
+}
+
+function materialize(name: SupportedOldSpaceFlag, seen: SeenFlag | undefined): OldSpaceFlag {
+  const flag = `--${name}`;
+  if (seen === undefined) {
+    return absentFlag(flag);
+  }
+  if (seen.rawValue === null) {
+    return baseFlag(flag, seen.source, "invalid", "node_24_requires_equals");
+  }
+  if (name === "max-old-space-size") {
+    const parsed = parseMebibytes(seen.rawValue);
+    if (parsed.state !== "known") {
+      return baseFlag(flag, seen.source, parsed.state, parsed.reason);
+    }
+    if (parsed.v8ZeroMeansDefault === true) {
+      return {
+        ...baseFlag(flag, seen.source, "known", "v8_zero_selects_the_default_old_space_size"),
+        unit: "mebibytes",
+        value: 0,
+        v8ZeroMeansDefault: true,
+      };
+    }
+    return {
+      ...baseFlag(flag, seen.source, "known"),
+      unit: "mebibytes",
+      value: parsed.value,
+      bytes: parsed.value * 1048576,
+      byteConversion: "mebibytes * 1048576",
+    };
+  }
+  const parsed = parsePercentage(seen.rawValue);
+  if (parsed.state !== "known") {
+    return baseFlag(flag, seen.source, parsed.state, parsed.reason);
+  }
+  return {
+    ...baseFlag(flag, seen.source, "known"),
+    unit: "percent",
+    value: parsed.value,
+  };
+}
+
+function selectEffective(size: OldSpaceFlag, percentage: OldSpaceFlag): Record<string, unknown> {
+  if (size.state === "missing_signal" || percentage.state === "missing_signal") {
+    return {
+      state: "missing_signal",
+      setting: null,
+      source: size.state === "missing_signal" ? size.source : percentage.source,
+      reason: size.reason ?? percentage.reason ?? "unparsed_old_space_input",
+    };
+  }
+  if (percentage.state === "known") {
+    return { state: "known", setting: "maxOldSpaceSizePercentage", source: percentage.source };
+  }
+  if (percentage.state === "invalid") {
+    return { state: "invalid", setting: "maxOldSpaceSizePercentage", source: percentage.source, reason: percentage.reason };
+  }
+  if (size.state === "known") {
+    return { state: "known", setting: "maxOldSpaceSize", source: size.source };
+  }
+  if (size.state === "invalid") {
+    return { state: "invalid", setting: "maxOldSpaceSize", source: size.source, reason: size.reason };
+  }
+  return { state: "unset", setting: null, source: "absent" };
+}
+
+export function readOldSpace(sources: OldSpaceSources): Record<string, unknown> {
+  const seen = new Map<SupportedOldSpaceFlag, SeenFlag>();
+  if (sources.nodeOptions !== undefined && sources.nodeOptions.length > 0) {
+    const parsed = parseNodeOptions(sources.nodeOptions);
+    if (!parsed.ok) {
+      const maxOldSpaceSize = unparsedFlag("--max-old-space-size", parsed.reason);
+      const maxOldSpaceSizePercentage = unparsedFlag("--max-old-space-size-percentage", parsed.reason);
+      return {
+        maxOldSpaceSize,
+        maxOldSpaceSizePercentage,
+        effective: { state: "missing_signal", setting: null, source: "NODE_OPTIONS", reason: parsed.reason },
+        precedence: OLD_SPACE_PRECEDENCE,
+        distinctFrom: "v8HeapSizeLimit",
+      };
+    }
+    absorbFlags(parsed.tokens, "NODE_OPTIONS", seen);
+  }
+  absorbFlags(sources.execArgv, "process.execArgv", seen);
+  const maxOldSpaceSize = materialize("max-old-space-size", seen.get("max-old-space-size"));
+  const maxOldSpaceSizePercentage = materialize("max-old-space-size-percentage", seen.get("max-old-space-size-percentage"));
   return {
     maxOldSpaceSize,
     maxOldSpaceSizePercentage,
-    precedence: "max-old-space-size-percentage overrides max-old-space-size when both are set",
+    effective: selectEffective(maxOldSpaceSize, maxOldSpaceSizePercentage),
+    precedence: OLD_SPACE_PRECEDENCE,
     distinctFrom: "v8HeapSizeLimit",
   };
 }
@@ -299,7 +482,10 @@ export class TelemetryCollector {
         },
       },
       settings: {
-        oldSpace: readOldSpace(process.execArgv),
+        oldSpace: readOldSpace({
+          execArgv: process.execArgv,
+          nodeOptions: process.env.NODE_OPTIONS,
+        }),
         v8HeapSizeLimit: {
           state: "known",
           source: "v8.getHeapStatistics().heap_size_limit",

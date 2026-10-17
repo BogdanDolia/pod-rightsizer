@@ -1,6 +1,6 @@
 {
   "scenarioId": "node-http-quote",
-  "scenarioVersion": "1",
+  "scenarioVersion": "2",
   "currency": "USD",
   "subtotalCents": 1057,
   "taxCents": 85,

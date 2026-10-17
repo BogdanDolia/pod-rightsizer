@@ -182,6 +182,9 @@ jobs:
       - name: Check the reference fixture
         run: bash scripts/check-node-http.sh
 
+      - name: Check cleanup fault injection
+        run: bash scripts/check-node-http-faults.sh
+
       - name: Install the pinned external k6 runner
         run: |
           bash scripts/install-fixture-k6.sh "$RUNNER_TEMP/fixture-k6/bin"

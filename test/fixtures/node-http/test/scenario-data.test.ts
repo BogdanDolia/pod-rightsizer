@@ -19,8 +19,10 @@ test("scenario inputs match the cart quote", () => {
     lineCount: number;
   };
   const quote = quoteCart(input.items);
+  const scenario = readFileSync(join(fixtureRoot, "scenario/quote.js"), "utf8");
   assert.equal(expected.scenarioId, "node-http-quote");
-  assert.equal(expected.scenarioVersion, "1");
+  assert.equal(expected.scenarioVersion, "2");
+  assert.match(scenario, new RegExp(`scenarioVersion: ${expected.scenarioVersion}`));
   assert.equal(quote.currency, expected.currency);
   assert.equal(quote.lines.length, expected.lineCount);
   assert.equal(quote.subtotalCents, expected.subtotalCents);

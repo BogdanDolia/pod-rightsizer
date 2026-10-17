@@ -12,9 +12,20 @@ export interface SpawnedServer {
 export function spawnReference(env: Record<string, string | undefined>, args: string[] = []): SpawnedServer {
   let stdout = "";
   let stderr = "";
+  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) {
+      delete childEnv[key];
+    } else {
+      childEnv[key] = value;
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(env, "NODE_OPTIONS")) {
+    delete childEnv.NODE_OPTIONS;
+  }
   const child = spawn(process.execPath, [...args, "--enable-source-maps", "dist/server.js"], {
     cwd: fixtureRoot,
-    env: { ...process.env, ...env },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.setEncoding("utf8");

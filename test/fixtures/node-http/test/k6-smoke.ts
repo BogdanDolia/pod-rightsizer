@@ -55,7 +55,7 @@ async function runScenario(name: string, baseUrl: string, shouldPass: boolean): 
     ], {
       cwd: fixtureRoot,
       env: { ...process.env, K6_NO_USAGE_REPORT: "true" },
-      timeout: 45_000,
+      timeout: 60_000,
       maxBuffer: 4 * 1024 * 1024,
     }));
   } catch (error) {
@@ -90,7 +90,18 @@ async function runScenario(name: string, baseUrl: string, shouldPass: boolean): 
 }
 
 const baseline = await startReference({ PORT: "0", NODE_HTTP_MODE: "baseline", NODE_HTTP_INTENSITY: "0" });
-const wrongAnswer = createServer((_request, response) => {
+const wrongAnswer = createServer((request, response) => {
+  const url = request.url ?? "/";
+  if (request.method === "GET" && url.startsWith("/load-phases")) {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ measuredOpen: true, warmupInFlight: 0 }));
+    return;
+  }
+  if (request.method === "POST" && url.startsWith("/load-phases/open-measured")) {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ measuredOpen: true, warmupInFlight: 0 }));
+    return;
+  }
   response.writeHead(200, { "Content-Type": "application/json" });
   response.end(JSON.stringify(wrongPayload));
 });

@@ -1,4 +1,4 @@
-import express, { type ErrorRequestHandler, type Express } from "express";
+import express, { type ErrorRequestHandler, type Express, type NextFunction, type Request, type Response } from "express";
 import { InFlightGate } from "./capacity.js";
 import type { AppConfig, Mode } from "./config.js";
 import type { BuildManifest } from "./build-manifest.js";
@@ -12,6 +12,7 @@ import {
 } from "./limits.js";
 import { buildMetadata, createProcessIdentity, defaultRetention, type ProcessIdentity } from "./metadata.js";
 import { parseQuoteBody, quoteCart, QuoteError, type Quote } from "./quote.js";
+import { LoadPhaseLedger, loadPhaseName } from "./load-phases.js";
 import { BoundedRetainer } from "./retention.js";
 import { TelemetryCollector } from "./telemetry.js";
 import { allocateHeapObjects, allocateUsedBuffer, delay, runCpuWork, type HeapObject } from "./work.js";
@@ -79,6 +80,7 @@ export function createApp(input: {
     buffer: bufferRetainer.stats(),
   }));
   const gate = new InFlightGate(input.maxInFlight ?? defaultRetention.maxInFlight);
+  const loadPhases = new LoadPhaseLedger();
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
@@ -115,7 +117,27 @@ export function createApp(input: {
     ));
   });
 
+  app.get("/load-phases", (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json(loadPhases.snapshot());
+  });
+
+  app.post("/load-phases/open-measured", (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    const opened = loadPhases.tryOpenMeasured();
+    res.status(opened ? 200 : 409).json(loadPhases.snapshot());
+  });
+
   app.post("/v1/quote", async (req, res, next) => {
+    const workId = loadPhases.begin(loadPhaseName(req.header("x-load-phase")));
+    try {
+      await quoteRequest(req, res, next);
+    } finally {
+      loadPhases.finish(workId);
+    }
+  });
+
+  async function quoteRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
     let quote: Quote;
     try {
       quote = quoteCart(parseQuoteBody(req.body));
@@ -175,7 +197,7 @@ export function createApp(input: {
     } finally {
       gate.leave();
     }
-  });
+  }
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

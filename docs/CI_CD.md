@@ -12,11 +12,11 @@ The workflow follows [tsastat](https://github.com/BogdanDolia/tsastat/tree/26800
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on PRs to `main`, pushes to `main`, manual dispatch, and calls from the release workflow. It has read-only repository permissions and cancels superseded runs for the same workflow/ref.
+`.github/workflows/ci.yml` runs on PRs to `main`, pushes to `main`, manual dispatch, and calls from the release workflow. It has read-only repository permissions and cancels superseded runs for the same workflow/ref. All workflows use the explicit `ubuntu-24.04` runner label so an `ubuntu-latest` migration cannot change the operating system unexpectedly.
 
 | Job | Checks |
 | --- | --- |
-| `Go 1.25.x` and `Go stable` | `go mod tidy -diff`, `gofmt`, `go vet`, race-enabled tests with coverage, build both commands |
+| `Go minimum` and `Go stable` | Minimum Go read from `go.mod`, plus the current stable release; `go mod tidy -diff`, `gofmt`, `go vet`, race-enabled tests with coverage, build both commands |
 | `kind end-to-end` | Create an isolated cluster and prove server-side patch dry-run leaves both target and sidecar unchanged |
 | `GoReleaser snapshot` | Build Linux amd64/arm64 archives; extract the amd64 archive and start its packaged Advisor UI without using source-tree files |
 | `Website checks` | Validate local asset/fragment links and JavaScript syntax |
@@ -24,7 +24,7 @@ The workflow follows [tsastat](https://github.com/BogdanDolia/tsastat/tree/26800
 
 The kind scenario validates resource patch behavior; it does not perform a full load-test/Metrics Server integration test. Coverage is collected, without an arbitrary global percentage threshold.
 
-Weekly Dependabot updates cover Go modules and GitHub Actions, matching tsastat. Action references are pinned to commit SHAs. The Go matrix uses this repository's Go 1.25 minimum rather than tsastat's Go 1.22.
+Weekly Dependabot updates cover Go modules and GitHub Actions. Action references are pinned to commit SHAs and updated together. Kubernetes modules (`k8s.io/*` and `sigs.k8s.io/*`) are grouped for both version and security updates: upgrading `apimachinery` or `api` independently of `client-go` can produce incompatible generated code. Kubernetes v0.37.1 requires Go 1.26; the minimum CI job follows `go.mod` automatically when a dependency update raises that requirement. Docker and user-facing build instructions must be updated alongside a change in the required Go series.
 
 ## Releases
 

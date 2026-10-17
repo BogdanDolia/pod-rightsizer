@@ -24,7 +24,7 @@ The default CPU limit policy is `none` to avoid CPU throttling. The default memo
 
 ## Build
 
-Go 1.25 or newer is required.
+Go 1.26 or newer is required.
 
 ```bash
 git clone https://github.com/BogdanDolia/pod-rightsizer.git

@@ -141,7 +141,9 @@ jobs:
         run: python3 scripts/check-site.py
 
       - name: Check JavaScript syntax
-        run: node --check site/app.js
+        run: |
+          node --check site/theme.js
+          node --check site/app.js
 
   check:
     name: CI passed

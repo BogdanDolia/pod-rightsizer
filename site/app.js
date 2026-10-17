@@ -17,6 +17,15 @@ function renderPolicy() {
   document.getElementById("cpu-buffer-value").value = `${cpuPercent}%`;
   document.getElementById("memory-buffer-value").value = `${memoryPercent}%`;
   document.getElementById("memory-multiplier-value").value = `${multiplier.toFixed(1)}×`;
+  for (const [id, value, unit] of [
+    ["summary-cpu", cpuRequest, "m"],
+    ["summary-memory", memoryRequest, "Mi"],
+    ["summary-limit", memoryRequest * multiplier, "Mi"],
+  ]) {
+    const suffix = document.createElement("span");
+    suffix.textContent = unit;
+    document.getElementById(id).replaceChildren(String(rounded(value)), suffix);
+  }
   patchOutput.textContent = `apiVersion: apps/v1
 kind: Deployment
 metadata:

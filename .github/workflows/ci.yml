@@ -7,12 +7,14 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -117,3 +119,43 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: release --snapshot --clean
+
+      - name: Smoke test the packaged commands and Advisor UI
+        run: bash scripts/check-release.sh
+
+  site:
+    name: Website checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check local links and assets
+        run: python3 scripts/check-site.py
+
+      - name: Check JavaScript syntax
+        run: node --check site/app.js
+
+  check:
+    name: CI passed
+    if: always()
+    needs: [test, kind-e2e, release-snapshot, site]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Require every check to succeed
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          KIND_RESULT: ${{ needs.kind-e2e.result }}
+          SNAPSHOT_RESULT: ${{ needs.release-snapshot.result }}
+          SITE_RESULT: ${{ needs.site.result }}
+        run: |
+          for result in "$TEST_RESULT" "$KIND_RESULT" "$SNAPSHOT_RESULT" "$SITE_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "A required CI job did not succeed: $result"
+              exit 1
+            fi
+          done

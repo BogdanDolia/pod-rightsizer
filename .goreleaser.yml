@@ -4,7 +4,7 @@ project_name: pod-rightsizer
 
 before:
   hooks:
-    - go mod tidy
+    - go mod tidy -diff
     - go test ./...
 
 builds:
@@ -50,6 +50,7 @@ archives:
     files:
       - LICENSE
       - README.md
+      - web/ui/**
 
 checksum:
   name_template: checksums.txt

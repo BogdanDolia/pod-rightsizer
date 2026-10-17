@@ -1,6 +1,12 @@
 # Pod Rightsizer
 
+[![CI](https://github.com/BogdanDolia/pod-rightsizer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BogdanDolia/pod-rightsizer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/BogdanDolia/pod-rightsizer)](https://github.com/BogdanDolia/pod-rightsizer/releases)
+[![Website](https://img.shields.io/badge/website-GitHub%20Pages-167966)](https://bogdandolia.github.io/pod-rightsizer/)
+
 Pod Rightsizer measures one container in a Kubernetes Deployment during a load test and recommends auditable CPU and memory requests/limits.
+
+[Project website](https://bogdandolia.github.io/pod-rightsizer/) · [CI/CD and contribution workflow](docs/CI_CD.md)
 
 ## How recommendations are calculated
 
@@ -26,7 +32,9 @@ cd pod-rightsizer
 go build -o pod-rightsizer ./cmd/pod-rightsizer
 ```
 
-CI checks module tidiness, formatting, `go vet`, race-enabled tests, both commands, a GoReleaser snapshot, and a kind scenario that proves `dryRun=All` leaves the target and sidecar unchanged. Tags matching `v*` publish linux amd64/arm64 archives for `pod-rightsizer` and `advisor-api`, a checksum file, and GitHub artifact attestations.
+CI checks module tidiness, formatting, `go vet`, race-enabled tests, both commands, the static website, a GoReleaser snapshot with an archive smoke test, and a kind scenario that proves `dryRun=All` leaves the target and sidecar unchanged. Release tags on `main` history rerun the same checks before publishing Linux amd64/arm64 archives, checksums, and GitHub artifact attestations. The archives contain both commands and the Advisor UI; run `./advisor-api` from the extracted directory.
+
+The public GitHub Pages site is a static project guide with an illustrative policy explorer. The Advisor API runs in your own environment and is not deployed to GitHub Pages.
 
 ## CLI usage
 

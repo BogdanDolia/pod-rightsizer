@@ -104,18 +104,22 @@ func TestRunUsesHTTPTestServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := NewTester(server.URL, 200, 0).Run(context.Background(), 40*time.Millisecond)
+	result, err := NewTester(server.URL, 200, 0).Run(context.Background(), 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if requests.Load() == 0 || result.Requests == 0 {
 		t.Fatalf("server requests/result requests = %d/%d, want positive", requests.Load(), result.Requests)
 	}
-	if result.StatusCodes[http.StatusNoContent] != int(requests.Load()) {
-		t.Fatalf("status codes/server requests = %#v/%d", result.StatusCodes, requests.Load())
+	// Deadline cancellation may discard a response after the server has seen
+	// the request. Validate completed responses rather than equating both sides
+	// of that cancellation boundary.
+	completed := result.StatusCodes[http.StatusNoContent]
+	if len(result.StatusCodes) != 1 || completed == 0 || completed > int(requests.Load()) {
+		t.Fatalf("completed status codes/server requests = %#v/%d", result.StatusCodes, requests.Load())
 	}
-	if result.Requests < int(requests.Load()) {
-		t.Fatalf("result requests = %d, server requests = %d", result.Requests, requests.Load())
+	if result.Requests != completed+result.HTTPErrors {
+		t.Fatalf("result requests/completed/errors = %d/%d/%d", result.Requests, completed, result.HTTPErrors)
 	}
 }
 

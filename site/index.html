@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Measure a Kubernetes container under load. Get explainable CPU and memory recommendations and a resource patch validated by the Kubernetes API." />
+    <meta name="theme-color" content="#f5f6f2" />
+    <meta property="og:title" content="Pod Rightsizer — resources, with evidence" />
+    <meta property="og:description" content="Load-test your service. Understand its resource needs. Review a validated Kubernetes patch." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bogdandolia.github.io/pod-rightsizer/" />
+    <link rel="canonical" href="https://bogdandolia.github.io/pod-rightsizer/" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+    <title>Pod Rightsizer — resources, with evidence</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">▥</span> pod rightsizer</a>
+        <nav aria-label="Primary navigation">
+          <a href="#workflow">How it works</a>
+          <a href="#explore">Explore a policy</a>
+          <a href="#start">Get started</a>
+        </nav>
+        <a class="repo-link" href="https://github.com/BogdanDolia/pod-rightsizer">GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero shell" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot"></span> Open-source Kubernetes tooling</p>
+          <h1>Resources,<br />with <span>evidence.</span></h1>
+          <p class="lede">Measure a container under load. Get CPU and memory recommendations you can explain — and a Kubernetes patch you can review.</p>
+          <div class="actions">
+            <a class="button primary" href="#start">Run your first analysis <span aria-hidden="true">→</span></a>
+            <a class="button secondary" href="#explore">Explore an example</a>
+          </div>
+          <p class="hero-note">Go CLI + Advisor API <span>·</span> Linux amd64 &amp; arm64 <span>·</span> Apache-2.0</p>
+        </div>
+        <div class="evidence-card" aria-label="Illustrative analysis result">
+          <div class="card-top"><span class="mono">checkout-api / api</span><span class="pill">Illustrative result</span></div>
+          <div class="card-heading"><span>Resource recommendation</span><span class="sample-label">sample data</span></div>
+          <div class="resource-row"><div><span class="resource-name">CPU request</span><strong>198<span>m</span></strong></div><div class="resource-chart"><span style="--bar: 66%"></span><i style="--marker: 60%"></i></div><small>p95 180m + 10% buffer</small></div>
+          <div class="resource-row"><div><span class="resource-name">Memory request</span><strong>174<span>Mi</span></strong></div><div class="resource-chart memory"><span style="--bar: 72.5%"></span><i style="--marker: 60.4%"></i></div><small>high-water 145Mi + 20% buffer</small></div>
+          <div class="card-bottom"><span>Measured usage <i class="legend observed"></i></span><span>Request + buffer <i class="legend buffered"></i></span></div>
+          <p class="evidence-caption">Each result explains the calculation, observed windows, and evidence quality.</p>
+        </div>
+      </section>
+
+      <section class="principles shell" aria-label="Analysis principles">
+        <div><span>01 / TARGET</span><strong>One explicit container</strong><p>Real Deployment selectors. Per-replica coverage.</p></div>
+        <div><span>02 / MEASURE</span><strong>Independent source windows</strong><p>Repeated polls do not become extra evidence.</p></div>
+        <div><span>03 / REVIEW</span><strong>Validated resource patch</strong><p>Server-side dry-run. Explicit manual application.</p></div>
+      </section>
+
+      <section class="section shell workflow" id="workflow">
+        <div class="section-heading"><p class="eyebrow">From test to review</p><h2>A clear path from<br />usage to configuration.</h2><p>Designed for engineers who need to understand where the numbers came from.</p></div>
+        <ol class="steps">
+          <li><span class="step-number">01</span><div><h3>Choose the workload</h3><p>Name the namespace, Deployment, and container. Keep the service URL separate from the object you measure.</p></div></li>
+          <li><span class="step-number">02</span><div><h3>Run a measured load test</h3><p>Set RPS or concurrency. Recommendations require the test to meet throughput, HTTP error-rate, and p95 latency thresholds.</p></div></li>
+          <li><span class="step-number">03</span><div><h3>Inspect the evidence</h3><p>Review CPU percentiles, memory high-water, independent sample count, policy, and the comparison with current settings.</p></div></li>
+          <li><span class="step-number">04</span><div><h3>Review the proposed change</h3><p>The generated patch must pass Kubernetes server-side dry-run. You decide when and how to apply it.</p></div></li>
+        </ol>
+      </section>
+
+      <section class="explorer-section" id="explore">
+        <div class="shell">
+          <div class="section-heading explorer-heading"><div><p class="eyebrow">Make the calculation tangible</p><h2>Explore a resource policy.</h2></div><p>A fixed sample: CPU p95 = 180m, memory high-water = 145Mi. Adjust the buffers to see the generated values.</p></div>
+          <div class="explorer">
+            <div class="policy-controls">
+              <div class="explorer-top"><h3>Policy inputs</h3><button id="reset-policy" class="text-button" type="button">Reset</button></div>
+              <label for="cpu-buffer">CPU request buffer <output id="cpu-buffer-value" for="cpu-buffer">10%</output></label>
+              <input id="cpu-buffer" type="range" min="0" max="50" step="5" value="10" />
+              <label for="memory-buffer">Memory request buffer <output id="memory-buffer-value" for="memory-buffer">20%</output></label>
+              <input id="memory-buffer" type="range" min="0" max="80" step="5" value="20" />
+              <label for="memory-multiplier">Memory limit multiplier <output id="memory-multiplier-value" for="memory-multiplier">1.2×</output></label>
+              <input id="memory-multiplier" type="range" min="1" max="2" step="0.1" value="1.2" />
+              <div class="policy-fixed"><span>CPU limit policy</span><code>none</code></div>
+              <p class="control-note">CPU requests use the selected percentile. Memory requests use the observed high-water mark. Limits have separate policies.</p>
+            </div>
+            <div class="patch-panel">
+              <div class="patch-toolbar"><span class="mono">example-resource-patch.yaml</span><button class="copy-button" data-copy="patch-output" type="button">Copy example</button></div>
+              <pre tabindex="0"><code id="patch-output">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: demo
+  name: checkout-api
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        resources:
+          requests:
+            cpu: "198m"
+            memory: "174Mi"
+          limits:
+            cpu: null
+            memory: "209Mi"</code></pre>
+            </div>
+          </div>
+          <p class="demo-note"><strong>Browser-only illustration.</strong> This page does not connect to a cluster or validate a patch. A real recommendation requires workload metrics, applicable policy, and server-side dry-run.</p>
+          <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
+          <noscript><p>The example above uses the default policy. Enable JavaScript to adjust the buffers.</p></noscript>
+        </div>
+      </section>
+
+      <section class="section shell start-section" id="start">
+        <div class="section-heading"><p class="eyebrow">Start with a service you know</p><h2>Build. Measure. Review.</h2><p>Use a representative test environment, a stable Deployment, and access to Kubernetes Metrics Server.</p><a class="inline-link" href="https://github.com/BogdanDolia/pod-rightsizer/blob/main/README.md">Read the full usage guide <span aria-hidden="true">↗</span></a></div>
+        <div class="quick-start">
+          <div class="code-block"><div class="code-toolbar"><span>1. Build from source · Go 1.25+</span><button class="copy-button" data-copy="build-command" type="button">Copy</button></div><pre tabindex="0"><code id="build-command">git clone https://github.com/BogdanDolia/pod-rightsizer.git
+cd pod-rightsizer
+go build -o pod-rightsizer ./cmd/pod-rightsizer</code></pre></div>
+          <div class="code-block"><div class="code-toolbar"><span>2. Run against your workload</span><button class="copy-button" data-copy="run-command" type="button">Copy</button></div><pre tabindex="0"><code id="run-command">./pod-rightsizer \
+  --target http://localhost:8080 \
+  --namespace default \
+  --deployment myservice-api \
+  --container api \
+  --duration 5m \
+  --rps 50 \
+  --output-format json</code></pre></div>
+          <p class="start-note">Expose the service URL first, for example with <code>kubectl port-forward service/myservice 8080:80</code>. The Kubernetes caller also needs Deployment patch permission for dry-run validation.</p>
+        </div>
+      </section>
+
+      <section class="shell boundaries" aria-labelledby="boundaries-heading">
+        <div><p class="eyebrow">Understand the result</p><h2 id="boundaries-heading">Measured evidence has a scope.</h2></div>
+        <div><p>A passing test describes the workload under the measured conditions. Confidence reflects sample count and observation duration. Server-side dry-run checks the API request; performance with the proposed resources still needs validation in your environment.</p><p>The Advisor API also supports observing current workload metrics without generating HTTP load. Run it in your own environment — the public project website is a static guide.</p></div>
+      </section>
+    </main>
+
+    <footer class="shell site-footer"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">▥</span> pod rightsizer</a><p>Open source. Explainable recommendations.</p><div><a href="https://github.com/BogdanDolia/pod-rightsizer">Source</a><a href="https://github.com/BogdanDolia/pod-rightsizer/releases">Releases</a><a href="https://github.com/BogdanDolia/pod-rightsizer/issues">Issues</a><a href="https://github.com/BogdanDolia/pod-rightsizer/blob/main/LICENSE">Apache-2.0</a></div></footer>
+  </body>
+</html>

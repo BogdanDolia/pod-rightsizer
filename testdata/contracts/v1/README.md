@@ -118,6 +118,9 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/validated-with-insufficient-evidence.json` | analysis | `validated` still requires evidence `valid` |
 | `invalid/validated-with-invalid-evidence.json` | analysis | `validated` still requires evidence `valid` |
 | `invalid/ready-export-insufficient-evidence.json` | analysis | ready export still requires evidence `valid` |
+| `invalid/ready-export-invalid-evidence.json` | analysis | ready export still requires evidence `valid` when evidence is `invalid` |
+| `invalid/insufficient-with-recommendation.json` | analysis | `insufficient` evidence keeps recommendation null |
+| `invalid/invalid-evidence-with-confidence.json` | analysis | `invalid` evidence keeps confidence null |
 | `invalid/cpu-limit-current-memory-bytes.json` | analysis | CPU limit `current` cannot use `memoryBytes` |
 | `invalid/cpu-limit-recommended-memory-bytes.json` | analysis | CPU limit `recommended` cannot use `memoryBytes` |
 | `invalid/memory-limit-current-cpu-milli.json` | analysis | memory limit `current` cannot use `cpuMilli` |

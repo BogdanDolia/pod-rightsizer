@@ -173,6 +173,26 @@
       ]
     },
     {
+      "id": "invalid-insufficient-with-recommendation",
+      "schema": "analysis.schema.json",
+      "document": "invalid/insufficient-with-recommendation.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/recommendation",
+        "got object, want null"
+      ]
+    },
+    {
+      "id": "invalid-invalid-evidence-with-confidence",
+      "schema": "analysis.schema.json",
+      "document": "invalid/invalid-evidence-with-confidence.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/evidenceConfidence",
+        "got object, want null"
+      ]
+    },
+    {
       "id": "invalid-load-not-started-with-errors",
       "schema": "observations.schema.json",
       "document": "invalid/load-not-started-with-errors.json",
@@ -325,6 +345,18 @@
       "id": "invalid-ready-export-insufficient-evidence",
       "schema": "analysis.schema.json",
       "document": "invalid/ready-export-insufficient-evidence.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/gitopsExport",
+        "not_requested",
+        "/evidence",
+        "value must be 'valid'"
+      ]
+    },
+    {
+      "id": "invalid-ready-export-invalid-evidence",
+      "schema": "analysis.schema.json",
+      "document": "invalid/ready-export-invalid-evidence.json",
       "expect": "invalid",
       "errorContains": [
         "/gitopsExport",

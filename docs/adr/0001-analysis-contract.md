@@ -120,12 +120,12 @@ These fields are independent. A writer sets each one. The schema then rejects co
 | Axis | Values | Does not mean |
 | --- | --- | --- |
 | `execution` | `completed`, `failed`, `cancelled` | Valid evidence, passed SLO, verified source, validated candidate, or validated patch. |
-| `evidence` | `valid`, `insufficient`, `invalid` | A passed SLO. |
+| `evidence` | `valid`, `insufficient`, `invalid` | A passed SLO, or that no candidate test ran. `insufficient` and `invalid` may be `rejected` and keep `testedSettings` plus comparison ids. They are not `validated`, not a recommendation or confidence, and not a ready export. |
 | `target` | `verified`, `unverified`, `mismatch` | Image-to-source verification. |
 | `slo` | `passed`, `failed`, `not_evaluated` | `not_evaluated` is not a pass. |
 | `source` | `verified`, `declared`, `unverified`, `mismatch` | `declared` is not verified. |
 | `runtimeRules` | `evaluated`, `missing_signal`, `not_applicable` | `missing_signal` is not "healthy" or "problem absent". |
-| `candidate.state` | `not_tested`, `validated`, `rejected` | `not_tested` is the state before a later comparable run. |
+| `candidate.state` | `not_tested`, `validated`, `rejected` | `not_tested` is the state before a later comparable run: `testedSettings` is null and comparison ids are absent. It is not required for every `insufficient` or `invalid` result. `rejected` keeps the tested settings and comparison ids. |
 | `patch.state` | `not_requested`, `dry_run_passed`, `failed` | `dry_run_passed` is API and admission only. |
 | `patch.purpose` | `none`, `experimental`, `review` | `experimental` may exist before the candidate is tested. `review` requires `validated`. |
 | `gitopsExport` | `not_requested`, `blocked`, `ready` | Replay does not make an export fresh. |

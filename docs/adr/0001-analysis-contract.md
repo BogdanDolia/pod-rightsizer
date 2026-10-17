@@ -101,7 +101,7 @@ Text display `%.0f` and patch `math.Ceil` can disagree in the legacy program. T0
 | Current request or limit not read | `state` is `unknown`. This is not `absent`. |
 | Recommendation beside current settings | Both current requests and both current limits are `absent` or `set`. `unknown` requires `recommendation` null. |
 | Absent request inside a comparison | `currentMilli` or `currentBytes` is 0. That 0 is the delta input only. The recommended side keeps the recommendation floor: at least 10 millicores, or at least 32Mi on a mebibyte boundary. |
-| CPU or memory limit comparison | `cpuLimit` accepts `cpuMilli` or `absent`. `memoryLimit` accepts `memoryBytes` or `absent`. |
+| CPU or memory limit comparison | Each side is `absent` with no number, or `set` with only `cpuMilli` on `cpuLimit` and only `memoryBytes` on `memoryLimit`. |
 | Load not started | `executed` is false. `requests` and `httpErrors` are 0. `interval` is null. Termination is `not_started`, `context_canceled`, `invalid_configuration`, or `invalid_target`. |
 | Zero requests, including a load that did not start | `actualRps`, `httpErrorRate`, and `usefulThroughputRps` are JSON `null`. Latency states are `missing_signal`, not 0. |
 | Load started, then cancelled | `executed` stays true. Partial requests, rates, and latency may be recorded. |

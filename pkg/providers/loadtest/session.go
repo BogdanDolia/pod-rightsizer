@@ -221,8 +221,10 @@ func (s *Session) AbortBeforeStart(reason TerminationReason, err error) (Outcome
 	return s.Finish(reason, err)
 }
 
-// Finish closes an open phase, normalizes absent signals, and stores suitability.
-// It does not wait for the caller. A second call returns the same result.
+// Finish closes an open phase, checks known numeric facts, normalizes absent
+// signals, and stores suitability. It does not wait for the caller. A second
+// call returns the same result. Zero-request normalization does not erase an
+// invalid fact or the suitability reason that names it.
 func (s *Session) Finish(reason TerminationReason, runErr error) (Outcome, error) {
 	s.mu.Lock()
 	if s.finished {
@@ -298,9 +300,13 @@ func (s *Session) complete(reason TerminationReason, runErr error) {
 		s.applyNotStarted(reason)
 		return
 	}
+	// Read the reported numbers before normalization can replace them.
+	// The suitability stored below keeps these problems if a later pass
+	// would otherwise see only the normalized signals.
+	factProblems := reportedFactProblems(s.outcome)
 	s.normalizeMeasured()
 	s.outcome.Partial = reason != TerminationDurationElapsed || runErr != nil
-	s.outcome.Suitability = AssessSuitability(s.req, s.spec, s.outcome)
+	s.outcome.Suitability = retainFactProblems(AssessSuitability(s.req, s.spec, s.outcome), factProblems)
 }
 
 func (s *Session) applyNotStarted(reason TerminationReason) {
@@ -369,15 +375,91 @@ func (s *Session) normalizeMeasured() {
 	if s.outcome.Latency.P99.State == "" {
 		s.outcome.Latency.P99 = MissingDuration()
 	}
+	// No completed requests make an in-range rate, ratio, latency, or status
+	// count meaningless. Replace those with missing signals. Keep a value
+	// when replacing it would drop a problem reportedFactProblems already
+	// named, so the invalid fact stays on the outcome.
 	if s.outcome.HTTPRequests.State == SignalKnown && s.outcome.HTTPRequests.Value == 0 {
-		s.outcome.HTTPErrorRate = MissingRatio()
-		s.outcome.ActualThroughput = MissingRate()
-		s.outcome.UsefulThroughput = MissingRate()
-		s.outcome.Latency.P50 = MissingDuration()
-		s.outcome.Latency.P95 = MissingDuration()
-		s.outcome.Latency.P99 = MissingDuration()
-		s.outcome.StatusCodes = nil
+		errorRate := s.outcome.HTTPErrorRate
+		s.replaceMeasuredFact(
+			func() { s.outcome.HTTPErrorRate = MissingRatio() },
+			func() { s.outcome.HTTPErrorRate = errorRate },
+		)
+		throughput := s.outcome.ActualThroughput
+		s.replaceMeasuredFact(
+			func() { s.outcome.ActualThroughput = MissingRate() },
+			func() { s.outcome.ActualThroughput = throughput },
+		)
+		useful := s.outcome.UsefulThroughput
+		s.replaceMeasuredFact(
+			func() { s.outcome.UsefulThroughput = MissingRate() },
+			func() { s.outcome.UsefulThroughput = useful },
+		)
+		p50 := s.outcome.Latency.P50
+		s.replaceMeasuredFact(
+			func() { s.outcome.Latency.P50 = MissingDuration() },
+			func() { s.outcome.Latency.P50 = p50 },
+		)
+		p95 := s.outcome.Latency.P95
+		s.replaceMeasuredFact(
+			func() { s.outcome.Latency.P95 = MissingDuration() },
+			func() { s.outcome.Latency.P95 = p95 },
+		)
+		p99 := s.outcome.Latency.P99
+		s.replaceMeasuredFact(
+			func() { s.outcome.Latency.P99 = MissingDuration() },
+			func() { s.outcome.Latency.P99 = p99 },
+		)
+		statusCodes := s.outcome.StatusCodes
+		s.replaceMeasuredFact(
+			func() { s.outcome.StatusCodes = nil },
+			func() { s.outcome.StatusCodes = statusCodes },
+		)
 	}
+}
+
+// replaceMeasuredFact applies one zero-request replacement. It restores the
+// previous value when the replacement drops a reported fact problem.
+func (s *Session) replaceMeasuredFact(apply func(), restore func()) {
+	before := reportedFactProblems(s.outcome)
+	apply()
+	if factProblemsLost(before, reportedFactProblems(s.outcome)) {
+		restore()
+	}
+}
+
+// retainFactProblems keeps problems discovered on the original facts.
+// Normalization and the suitability pass must not turn those into a usable result.
+func retainFactProblems(suitability Suitability, factProblems []string) Suitability {
+	if len(factProblems) == 0 {
+		return suitability
+	}
+	seen := make(map[string]struct{}, len(suitability.Reasons)+len(factProblems))
+	for _, reason := range suitability.Reasons {
+		seen[reason] = struct{}{}
+	}
+	for _, problem := range factProblems {
+		if _, exists := seen[problem]; exists {
+			continue
+		}
+		suitability.Reasons = append(suitability.Reasons, problem)
+		seen[problem] = struct{}{}
+	}
+	suitability.Usable = false
+	return suitability
+}
+
+func factProblemsLost(before, after []string) bool {
+	kept := make(map[string]struct{}, len(after))
+	for _, problem := range after {
+		kept[problem] = struct{}{}
+	}
+	for _, problem := range before {
+		if _, exists := kept[problem]; !exists {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Session) prepareStart(name PhaseName) (PhaseEvent, error) {

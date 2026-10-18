@@ -20,9 +20,10 @@
 // not negative. A known ratio is finite and in the range [0, 1]. Known HTTP
 // errors cannot exceed known HTTP requests. An out-of-range fact stays on the
 // outcome. It is not replaced with zero, missing, or unknown, and it is not a
-// usable measurement or a passed SLO. Zero HTTP requests keep rates and latency
-// at SignalMissing. A load that never started has Executed false and a nil
-// measured interval.
+// usable measurement or a passed SLO. Zero HTTP requests normalize in-range
+// rates, ratios, latency, and status counts to SignalMissing. They do not
+// erase an out-of-range fact or the suitability reason that names it. A load
+// that never started has Executed false and a nil measured interval.
 //
 // # Phases
 //

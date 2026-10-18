@@ -326,6 +326,76 @@
       ]
     },
     {
+      "id": "invalid-node-support-extra-field",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/node-support-extra-field.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/runtime/node/support",
+        "additional properties 'fixtureVersion' not allowed"
+      ]
+    },
+    {
+      "id": "invalid-node-support-line-22",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/node-support-line-22.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/runtime/node/support/line",
+        "value must be '24'"
+      ]
+    },
+    {
+      "id": "invalid-node-support-line-26",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/node-support-line-26.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/runtime/node/support/line",
+        "value must be '24'"
+      ]
+    },
+    {
+      "id": "invalid-node-support-null-line",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/node-support-null-line.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/runtime/node/support/line",
+        "value must be '24'"
+      ]
+    },
+    {
+      "id": "invalid-node-support-observed-as-line",
+      "schema": "runtime-findings.schema.json",
+      "document": "invalid/node-support-observed-as-line.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/nodejs/support/line",
+        "value must be '24'"
+      ]
+    },
+    {
+      "id": "invalid-node-support-patch-as-line",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/node-support-patch-as-line.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/runtime/node/support/line",
+        "value must be '24'"
+      ]
+    },
+    {
+      "id": "invalid-node-support-pending-status",
+      "schema": "run-spec.schema.json",
+      "document": "invalid/node-support-pending-status.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/runtime/node/support/status",
+        "value must be 'pinned_lts'"
+      ]
+    },
+    {
       "id": "invalid-not-comparable-but-pass",
       "schema": "comparison-result.schema.json",
       "document": "invalid/not-comparable-but-pass.json",
@@ -1188,6 +1258,18 @@
       "id": "valid-load-cancelled-partial-observations",
       "schema": "observations.schema.json",
       "document": "valid/load-cancelled-partial/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-node-support-pin-run-spec",
+      "schema": "run-spec.schema.json",
+      "document": "valid/node-support-pin/run-spec.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-node-support-pin-runtime-findings",
+      "schema": "runtime-findings.schema.json",
+      "document": "valid/node-support-pin/runtime-findings.json",
       "expect": "valid"
     },
     {

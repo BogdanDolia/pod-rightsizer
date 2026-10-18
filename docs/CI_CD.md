@@ -5,7 +5,7 @@ The workflow follows [tsastat](https://github.com/HelixThinker/tsastat/tree/2680
 ## Branches and pull requests
 
 - `main` is the integration and release branch. Create short-lived branches from an updated `main`, for example `codex/ci-release-alignment`.
-- Open a pull request targeting `main`. The `CI passed` check must succeed before merging. This aggregate check fails if any test, kind, snapshot, website, or analysis-contract job fails or is skipped.
+- Open a pull request targeting `main`. The `CI passed` check must succeed before merging. This aggregate check fails if any test, kind, snapshot, website, analysis-contract, or Node HTTP fixture job fails or is skipped.
 - Changes must go through a PR; an additional person's approval is not required. Resolve review discussions before merging. Force pushes and branch deletion are blocked on `main`.
 - Use squash merge for a focused change. GitHub deletes merged head branches automatically. No persistent `develop` or release branch is needed.
 - Repository rules are configured in GitHub, separately from these versioned workflows. Changes to the CI job graph must preserve the `CI passed` check name or update the rule at the same time.
@@ -21,9 +21,12 @@ The workflow follows [tsastat](https://github.com/HelixThinker/tsastat/tree/2680
 | `GoReleaser snapshot` | Build Linux amd64/arm64 archives; extract the amd64 archive and start its packaged Advisor UI without using source-tree files |
 | `Website checks` | Validate local asset/fragment links and JavaScript syntax |
 | `Analysis contract` | `bash scripts/check-contracts.sh`: compile `contracts/v1` and validate `testdata/contracts/v1` |
+| `Node HTTP fixture` | Node.js 24.22.0 and `bash scripts/check-node-http.sh`: functional checks. Separately install checksum-pinned upstream k6 1.8.2 and run `test:k6`: the baseline must pass and HTTP 200 with a wrong total must fail measured application checks. Docker, regression-mode, and kind experiments remain separate |
 | `CI passed` | Require all preceding jobs to succeed |
 
 The kind scenario validates resource patch behavior; it does not perform a full load-test/Metrics Server integration test. Coverage is collected, without an arbitrary global percentage threshold.
+
+The fixture job installs unchanged k6 with `bash scripts/install-fixture-k6.sh <bin-directory>` and the committed version/checksums in `test/fixtures/node-http/scenario/`. It is an external test dependency, not a Go library or a component of the Pod Rightsizer release or fixture image. See the fixture README for installation and the separate upstream AGPLv3 license. A missing or wrong-version runner fails the k6 check without falling back to the built-in Go tester. Local smoke summaries, raw metrics, and logs are saved under the ignored fixture `.experiments/k6-smoke-*` directory.
 
 Weekly Dependabot updates cover Go modules and GitHub Actions. Action references are pinned to commit SHAs and updated together. Kubernetes modules (`k8s.io/*` and `sigs.k8s.io/*`) are grouped for both version and security updates: upgrading `apimachinery` or `api` independently of `client-go` can produce incompatible generated code. Kubernetes v0.37.1 requires Go 1.26; the minimum CI job follows `go.mod` automatically when a dependency update raises that requirement. Docker and user-facing build instructions must be updated alongside a change in the required Go series.
 

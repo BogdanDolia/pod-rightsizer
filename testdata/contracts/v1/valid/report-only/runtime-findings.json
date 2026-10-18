@@ -17,8 +17,8 @@
       "version": "22.14.0"
     },
     "support": {
-      "status": "pending_t02",
-      "line": null
+      "status": "pinned_lts",
+      "line": "24"
     },
     "processRole": "http_server",
     "eventLoop": {

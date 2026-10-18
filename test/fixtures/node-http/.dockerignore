@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-test
+test
+scenario
+manifests
+.experiments
+.git
+.env
+*.log
+README.md
+Dockerfile
+.dockerignore

@@ -52,16 +52,7 @@
       "required": ["observedVersion", "support", "processRole", "eventLoop", "gc", "memory"],
       "properties": {
         "observedVersion": { "$ref": "defs.schema.json#/$defs/nodeVersion" },
-        "support": {
-          "description": "The product's supported LTS line is not chosen in T01.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "line"],
-          "properties": {
-            "status": { "const": "pending_t02" },
-            "line": { "type": "null" }
-          }
-        },
+        "support": { "$ref": "defs.schema.json#/$defs/nodeSupport" },
         "processRole": { "const": "http_server" },
         "eventLoop": {
           "type": "object",

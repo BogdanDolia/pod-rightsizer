@@ -1,0 +1,4 @@
+37620781d35406ebf402397a6c5cf4adb62d175cb052ff45325ae0b860527063  k6-v1.8.2-linux-amd64.tar.gz
+8b4e55024ffc8ed7ed4caabca054dfb5bafe16e7ee4235de57d01bf58d69e0d7  k6-v1.8.2-linux-arm64.tar.gz
+3309d7ef81283055f32cd4ad516e33cf8fcbcd33c3c2edbd82a135864fd9becf  k6-v1.8.2-macos-amd64.zip
+2ce3ed837e9a7c7b1b7a594ff72861bbf9d94d5930ca6611bd6f1ef5a08f7d0a  k6-v1.8.2-macos-arm64.zip

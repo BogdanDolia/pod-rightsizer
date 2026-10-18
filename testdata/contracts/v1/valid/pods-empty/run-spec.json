@@ -101,8 +101,8 @@
     "selection": "explicit",
     "node": {
       "support": {
-        "status": "pending_t02",
-        "line": null
+        "status": "pinned_lts",
+        "line": "24"
       }
     }
   }

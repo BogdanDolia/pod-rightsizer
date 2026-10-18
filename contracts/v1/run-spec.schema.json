@@ -231,7 +231,7 @@
         "workloadShape": { "const": "http_api" },
         "selection": { "enum": ["explicit", "suggested"] },
         "node": {
-          "description": "Support pin is pending T02. An observed process version belongs in runtime findings, not here.",
+          "description": "Support pin chosen by T02. An observed process version belongs in runtime findings, not here.",
           "oneOf": [
             { "type": "null" },
             {
@@ -239,15 +239,7 @@
               "additionalProperties": false,
               "required": ["support"],
               "properties": {
-                "support": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["status", "line"],
-                  "properties": {
-                    "status": { "const": "pending_t02" },
-                    "line": { "type": "null" }
-                  }
-                }
+                "support": { "$ref": "defs.schema.json#/$defs/nodeSupport" }
               }
             }
           ]

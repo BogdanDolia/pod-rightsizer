@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Observations",
+  "dataClass": "synthetic_fixture",
+  "runId": "0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b",
+  "workload": {
+    "discovery": "not_obtained",
+    "unreadReason": "cancelled_before_discovery",
+    "namespace": "rightsizer-synthetic",
+    "name": "orders-api",
+    "container": "api"
+  },
+  "identityStable": false,
+  "ownerChain": [],
+  "pods": [],
+  "serviceMapping": {
+    "status": "unverified",
+    "routeProof": "none"
+  },
+  "experiment": {
+    "requirement": "strict_direct",
+    "requested": {
+      "routeMode": "direct_pod",
+      "runnerPlacement": "in_cluster",
+      "clusterName": "staging",
+      "namespace": "rightsizer-synthetic",
+      "deployment": "orders-api",
+      "pod": "orders-api-a",
+      "container": "api",
+      "port": 8080
+    },
+    "observed": {
+      "routeMode": "direct_pod",
+      "routeStatus": "unknown",
+      "proofMethod": "none",
+      "deploymentUid": { "state": "not_obtained" },
+      "podUid": { "state": "not_obtained" },
+      "container": { "state": "not_obtained" },
+      "image": { "state": "not_obtained" },
+      "dial": { "state": "not_obtained" },
+      "usedDial": { "state": "not_obtained" },
+      "runnerPlacement": "unknown",
+      "runnerSource": "not_obtained",
+      "runnerPodUid": { "state": "not_obtained" },
+      "runnerJobUid": { "state": "not_obtained" },
+      "runnerImageDigest": { "state": "not_obtained" },
+      "transparentProxy": "unknown",
+      "changes": []
+    },
+    "stop": {
+      "state": "not_requested",
+      "channel": "unknown"
+    }
+  },
+  "autoscaler": {
+    "hpa": {
+      "discovery": "not_attempted",
+      "state": "unknown"
+    },
+    "vpa": {
+      "discovery": "not_attempted",
+      "state": "unknown"
+    }
+  },
+  "load": {
+    "executed": false,
+    "termination": "context_canceled",
+    "requests": 0,
+    "httpErrors": 0,
+    "actualRps": null,
+    "httpErrorRate": null,
+    "latency": {
+      "semantics": "not_applicable",
+      "p50Ns": { "state": "missing_signal" },
+      "p95Ns": { "state": "missing_signal" },
+      "p99Ns": { "state": "missing_signal" }
+    },
+    "usefulThroughputRps": null,
+    "droppedIterations": null,
+    "generatorSaturated": null,
+    "interval": null
+  },
+  "windows": [],
+  "coverage": {
+    "expectedPodUids": [],
+    "podsWithMetrics": [],
+    "complete": false,
+    "independentWindowCount": 0,
+    "discardedWindowCount": 0
+  }
+}

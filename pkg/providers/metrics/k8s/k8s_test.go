@@ -67,12 +67,14 @@ func TestCollectKeepsSourceProvenance(t *testing.T) {
 				MemoryUsage:   128,
 				PolledAt:      polledAt,
 				Pods: []corek8s.PodResourceUsage{{
-					Name:            "api-0",
-					UID:             "22222222-2222-2222-2222-222222222222",
-					SourceTimestamp: sourceTime,
-					SourceWindow:    15 * time.Second,
-					CPUCores:        0.25,
-					MemoryMi:        128,
+					Name:             "api-0",
+					UID:              "22222222-2222-2222-2222-222222222222",
+					MetricsObjectUID: "33333333-3333-3333-3333-333333333333",
+					Role:             "workload",
+					SourceTimestamp:  sourceTime,
+					SourceWindow:     15 * time.Second,
+					CPUCores:         0.25,
+					MemoryMi:         128,
 				}},
 				Coverage: corek8s.Coverage{Assessed: true, Expected: 1, Observed: 1, Complete: true},
 				Workload: corek8s.WorkloadObservation{
@@ -111,6 +113,15 @@ func TestCollectKeepsSourceProvenance(t *testing.T) {
 	}
 	if !sample.Workload.DeploymentUIDObserved || sample.Workload.DeploymentUID == "" {
 		t.Fatalf("workload = %#v, want the observed UID", sample.Workload)
+	}
+	if sample.Pods[0].MetricsObjectUID != "33333333-3333-3333-3333-333333333333" || sample.Pods[0].UID == sample.Pods[0].MetricsObjectUID {
+		t.Fatalf("pod identity = %#v", sample.Pods[0])
+	}
+	if sample.Scope.Kind == "selected_pod" || sample.Scope.Status == "verified" {
+		t.Fatalf("aggregate collection claimed selected_pod: %#v", sample.Scope)
+	}
+	if sample.Scope.Attribution != "per_pod" {
+		t.Fatalf("attribution = %#v, want the pod row preserved", sample.Scope)
 	}
 }
 

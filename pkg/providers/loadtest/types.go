@@ -28,6 +28,15 @@ const (
 	CapabilityUsefulThroughput     Capability = "useful_throughput"
 	CapabilityDroppedWork          Capability = "dropped_work"
 	CapabilityGeneratorSaturation  Capability = "generator_saturation"
+	// CapabilityDirectRouteProof is the ability to record a route proof.
+	// Claiming it does not make a requested URL or an HTTP 200 verified.
+	CapabilityDirectRouteProof Capability = "direct_route_proof"
+	// CapabilityInClusterRunner is an observed runner inside the cluster.
+	// The temporary local process does not have this capability.
+	CapabilityInClusterRunner Capability = "in_cluster_runner"
+	// CapabilitySelectedPodMetrics is per-pod attribution for one container.
+	// An aggregate Deployment reading does not provide it.
+	CapabilitySelectedPodMetrics Capability = "selected_pod_metrics"
 )
 
 // Known reports whether capability is part of this contract's vocabulary.
@@ -43,7 +52,10 @@ func (c Capability) Known() bool {
 		CapabilityApplicationChecks,
 		CapabilityUsefulThroughput,
 		CapabilityDroppedWork,
-		CapabilityGeneratorSaturation:
+		CapabilityGeneratorSaturation,
+		CapabilityDirectRouteProof,
+		CapabilityInClusterRunner,
+		CapabilitySelectedPodMetrics:
 		return true
 	default:
 		return false
@@ -88,6 +100,9 @@ const (
 	TerminationInvalidTarget        TerminationReason = "invalid_target"
 	TerminationInternalError        TerminationReason = "internal_error"
 	TerminationNotStarted           TerminationReason = "not_started"
+	// TerminationControlLost means the controller lost the runner channel.
+	// It is not confirmation that the remote load has stopped.
+	TerminationControlLost TerminationReason = "control_channel_lost"
 )
 
 // LoadShape is the requested arrival pattern. It is not a measured rate.
@@ -115,8 +130,14 @@ const (
 	EdgeFinished PhaseEdge = "finished"
 )
 
-// Clock is the clock domain of an actual timestamp.
-const ClockCollectorLocal = "collector_local"
+// Clock domains of an actual timestamp. A runner timestamp stays on the
+// runner clock. It is not renamed to collector_local.
+const (
+	ClockCollectorLocal = "collector_local"
+	ClockRunner         = "runner"
+	ClockSource         = "source"
+	ClockUnknown        = "unknown"
+)
 
 // SignalState distinguishes a measurement from an absent or unresolved signal.
 type SignalState string
@@ -265,6 +286,10 @@ type Request struct {
 	Required          []Capability
 	LatencySemantics  LatencySemantics
 	OnPhase           PhaseObserver
+	Target            RequestedTarget
+	Route             RequestedRoute
+	Runner            RequestedRunner
+	StrictDirect      bool
 }
 
 // RequestedLoad is the request copied onto the outcome. It is not overwritten
@@ -278,10 +303,16 @@ type RequestedLoad struct {
 	Phases           []PhasePlan
 	LatencySemantics LatencySemantics
 	Required         []Capability
+	Target           RequestedTarget
+	Route            RequestedRoute
+	Runner           RequestedRunner
+	StrictDirect     bool
 }
 
 // PhaseActual is one phase that started. Planned is the requested duration
-// when the plan had one. StartedAt and FinishedAt are collector_local times.
+// when the plan had one. Clock is the domain of StartedAt and FinishedAt.
+// The in-process session uses collector_local. A remote runner event keeps
+// the runner domain.
 type PhaseActual struct {
 	Name         PhaseName
 	Planned      time.Duration
@@ -358,11 +389,27 @@ type Outcome struct {
 	Phases   []PhaseActual
 	Measured *Interval
 
+	Target       ObservedTarget
+	Route        ObservedRoute
+	Runner       ObservedRunner
+	Stop         StopReport
+	ClockMapping ClockMapping
+	Metrics      MetricsScopeReport
+	Transport    TransportDiagnostic
+
 	Suitability Suitability
 }
 
-// Provider runs one load request. Implementations stop that run's load before
-// returning, including on error and cancellation.
+// Provider runs one load request.
+//
+// An in-process adapter stops that run's load before returning, and it may
+// record StopConfirmed with InProcess set. A remote runner's return, including
+// an error, does not prove the remote process stopped. Stop records whether
+// stop was requested, confirmed, or unknown. A usable strict direct experiment
+// requires a confirmed stop. A lost control channel leaves stop unknown and
+// the outcome failed and unsuitable. The remote Job's own deadline bounds
+// load after the controller is gone. T10 enforces that deadline. This package
+// does not start a Job and does not treat a local error as remote confirmation.
 type Provider interface {
 	Run(ctx context.Context, req Request) (Outcome, error)
 }

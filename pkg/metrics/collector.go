@@ -112,6 +112,7 @@ type ClassifiedSample struct {
 type WindowEvidence struct {
 	Raw              []ClassifiedSample
 	Accepted         []ResourceMetrics
+	Diagnostic       []ClassifiedSample
 	IndependentCount int
 	DiscardedCount   int
 }
@@ -129,7 +130,7 @@ func IndependentSamples(samples []ResourceMetrics) ([]ResourceMetrics, error) {
 
 // ClassifyIndependent classifies samples without a measured-interval filter.
 func ClassifyIndependent(samples []ResourceMetrics) (WindowEvidence, error) {
-	return classifySamples(samples, time.Time{}, time.Time{}, false)
+	return classifySamples(samples, time.Time{}, time.Time{}, false, nil)
 }
 
 // FullyContainedSamples returns independent source windows that fall entirely
@@ -156,13 +157,14 @@ func ClassifyWindows(
 	if intervalStart.IsZero() || intervalEnd.IsZero() || !intervalEnd.After(intervalStart) {
 		return WindowEvidence{}, fmt.Errorf("measurement interval must have a non-zero end after its start")
 	}
-	return classifySamples(samples, intervalStart, intervalEnd, true)
+	return classifySamples(samples, intervalStart, intervalEnd, true, nil)
 }
 
 func classifySamples(
 	samples []ResourceMetrics,
 	intervalStart, intervalEnd time.Time,
 	filterInterval bool,
+	containment func(ResourceMetrics) (bool, string),
 ) (WindowEvidence, error) {
 	if len(samples) == 0 {
 		return WindowEvidence{}, nil
@@ -210,10 +212,19 @@ func classifySamples(
 
 	for _, index := range pending {
 		sample := raw[index].Sample
-		if filterInterval && !windowInside(sample, intervalStart, intervalEnd) {
-			raw[index].Disposition = DispositionDiscarded
-			raw[index].Reason = DiscardOutsideMeasured
-			continue
+		if filterInterval {
+			if containment != nil {
+				ok, reason := containment(sample)
+				if !ok {
+					raw[index].Disposition = DispositionDiscarded
+					raw[index].Reason = reason
+					continue
+				}
+			} else if !windowInside(sample, intervalStart, intervalEnd) {
+				raw[index].Disposition = DispositionDiscarded
+				raw[index].Reason = DiscardOutsideMeasured
+				continue
+			}
 		}
 		if sample.Coverage.Assessed && !sample.Coverage.Complete {
 			raw[index].Disposition = DispositionDiscarded

@@ -50,8 +50,11 @@
 // A planned duration is not substituted for those timestamps. Warmup and
 // cooldown are outside measured statistics. An adapter that cannot separate
 // those phases must not claim warmup_cooldown_phases. Planned durations and
-// actual edge times are both kept. Actual times use the process wall clock,
-// reported in UTC, with clock domain collector_local. They are not Metrics API
+// actual edge times are both kept. The in-process session records its own
+// wall clock in UTC as collector_local. StartPhaseAt and FinishPhaseAt keep a
+// supplied runner or source timestamp on that domain. They do not rename it
+// to collector_local. A clock mapping records the method and the uncertainty.
+// An unknown mapping is not zero uncertainty. These times are not Metrics API
 // source timestamps. Durations are nanoseconds.
 //
 // Cancellation or a deadline before the first phase leaves Executed false,
@@ -59,7 +62,26 @@
 // interval. The same stop after a phase has started leaves Executed true and
 // may keep a partial outcome, including a warmup phase when measured never
 // started. That prefix is not filled in with a measured phase, and it is not
-// a usable measurement. After Run returns, that run's load has stopped.
+// a usable measurement. An in-process adapter has stopped that run's load
+// when Run returns, and it records that confirmed in-process stop. A remote
+// runner is different: Run returning, including with an error, does not prove
+// the remote process stopped. Stop is requested, confirmed, or unknown. A
+// lost control channel is a failed unsuitable outcome with an unknown stop.
+// The remote Job deadline is what bounds that load. T10 enforces the deadline.
+// This package does not start a Job.
+//
+// # Direct route
+//
+// A strict direct request asks for an in-cluster runner and a direct_pod
+// proof. Suitability then requires the observed Pod, container, dial address,
+// runner, stop, clock mapping, and selected_pod scope to agree. A requested
+// URL, an HTTP 200, or a Service endpoint slice does not verify that route.
+// The local adapter reports an external placement and an unknown route. It
+// does not receive those capabilities, and a strict request does not change
+// its legacy success path. Live owner checks and the k6 Job are T05 and T10.
+// One Pod of several replicas can be measured and still not validate the
+// Deployment. T14 compares route mode, scope, engine, scenario, latency, and
+// runner resources and placement. Ephemeral Pod UIDs may differ.
 //
 // # Capabilities
 //

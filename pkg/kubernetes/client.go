@@ -48,8 +48,13 @@ type ContainerMetrics struct {
 // PodResourceUsage is one replica's Metrics API reading for the selected container.
 // UID is empty when the API object did not carry one.
 type PodResourceUsage struct {
-	Name            string
-	UID             string
+	Name string
+	UID  string
+	// MetricsObjectUID is the PodMetrics object UID when that object carried
+	// one. It is not assumed to equal UID. Empty means it was not present.
+	MetricsObjectUID string
+	// Role is workload, runner, or sidecar. Empty means a workload row.
+	Role            string
 	SourceTimestamp time.Time
 	SourceWindow    time.Duration
 	CPUCores        float64
@@ -424,12 +429,14 @@ func (c *Client) GetPodMetrics(
 			latestSourceEnd = pod.Timestamp.Time
 		}
 		usages = append(usages, PodResourceUsage{
-			Name:            pod.Name,
-			UID:             observedPodUID(expectedPods[pod.Name], string(pod.UID)),
-			SourceTimestamp: pod.Timestamp.Time,
-			SourceWindow:    pod.Window.Duration,
-			CPUCores:        cpuUsage,
-			MemoryMi:        memoryUsage,
+			Name:             pod.Name,
+			UID:              observedPodUID(expectedPods[pod.Name], string(pod.UID)),
+			MetricsObjectUID: string(pod.UID),
+			Role:             "workload",
+			SourceTimestamp:  pod.Timestamp.Time,
+			SourceWindow:     pod.Window.Duration,
+			CPUCores:         cpuUsage,
+			MemoryMi:         memoryUsage,
 		})
 	}
 

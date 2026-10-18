@@ -62,23 +62,26 @@ func (t *Tester) Run(ctx context.Context, req contract.Request) (contract.Outcom
 	}
 	if req.Adapter.ID != AdapterID {
 		err := fmt.Errorf("%w: local adapter cannot run %q", contract.ErrUnsupportedAdapter, req.Adapter.ID)
-		return notStarted(req, contract.TerminationInvalidConfiguration, err), err
+		return contract.ApplyLegacyFacts(req, legacySpec(), notStarted(req, contract.TerminationInvalidConfiguration, err)), err
 	}
 	session, err := contract.Begin(ctx, req)
 	if err != nil {
-		return session.Outcome(), err
+		return contract.ApplyLegacyFacts(req, legacySpec(), session.Outcome()), err
 	}
 
 	duration, err := session.MeasuredDuration()
 	if err != nil {
-		return session.AbortBeforeStart(contract.TerminationInvalidConfiguration, err)
+		outcome, abortErr := session.AbortBeforeStart(contract.TerminationInvalidConfiguration, err)
+		return contract.ApplyLegacyFacts(req, legacySpec(), outcome), abortErr
 	}
 	generator := corelt.NewTester(req.TargetURL, req.RequestedRPS, req.Concurrency)
 	if reason, preflightErr := generator.Preflight(ctx, duration); preflightErr != nil {
-		return session.AbortBeforeStart(reason, preflightErr)
+		outcome, err := session.AbortBeforeStart(reason, preflightErr)
+		return contract.ApplyLegacyFacts(req, legacySpec(), outcome), err
 	}
 	if err := session.StartPhase(contract.PhaseMeasured); err != nil {
-		return session.AbortBeforeStart(contract.TerminationInvalidConfiguration, err)
+		outcome, abortErr := session.AbortBeforeStart(contract.TerminationInvalidConfiguration, err)
+		return contract.ApplyLegacyFacts(req, legacySpec(), outcome), abortErr
 	}
 
 	result, runErr := generator.Run(ctx, duration)
@@ -87,7 +90,8 @@ func (t *Tester) Run(ctx context.Context, req contract.Request) (contract.Outcom
 	if reason == "" {
 		reason = contract.TerminationFromContext(ctx)
 	}
-	return session.Finish(reason, runErr)
+	outcome, err := session.Finish(reason, runErr)
+	return contract.ApplyLegacyFacts(req, legacySpec(), outcome), err
 }
 
 func applyCoreResult(session *contract.Session, result corelt.RunResult) {

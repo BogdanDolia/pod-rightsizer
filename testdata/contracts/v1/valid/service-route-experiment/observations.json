@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "Observations",
+  "dataClass": "synthetic_fixture",
+  "runId": "0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c",
+  "workload": {
+    "discovery": "read",
+    "namespace": "rightsizer-synthetic",
+    "name": "orders-api",
+    "container": "api",
+    "deploymentUid": "d1111111-1111-4111-8111-111111111111",
+    "deploymentGeneration": 7,
+    "podSelector": "app=orders",
+    "replicas": {
+      "desired": 2,
+      "observed": 2
+    },
+    "image": {
+      "reference": "example.invalid/orders-api:synthetic",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "stability": {
+      "deploymentUid": "unchanged",
+      "generation": "unchanged",
+      "imageDigest": "unchanged",
+      "containerRestarted": false,
+      "replicasFixed": true
+    }
+  },
+  "identityStable": true,
+  "ownerChain": [
+    {
+      "kind": "ReplicaSet",
+      "name": "orders-api-synthetic",
+      "uid": "d3333333-3333-4333-8333-333333333333"
+    }
+  ],
+  "pods": [
+    {
+      "name": "orders-api-a",
+      "uid": "d2222222-2222-4222-8222-222222222222",
+      "ownerUid": "d3333333-3333-4333-8333-333333333333",
+      "containerId": "containerd://synthetic-orders-api-a",
+      "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restartCount": 0,
+      "nodeName": "synthetic-node-a",
+      "nodeClass": {
+        "state": "known",
+        "name": "staging-standard"
+      }
+    }
+  ],
+  "serviceMapping": {
+    "status": "verified",
+    "serviceName": "orders",
+    "routeProof": "endpoint_slice"
+  },
+  "experiment": {
+    "requirement": "legacy",
+    "requested": {
+      "routeMode": "service",
+      "runnerPlacement": "external",
+      "serviceName": "orders"
+    },
+    "observed": {
+      "routeMode": "service",
+      "routeStatus": "verified",
+      "proofMethod": "endpoint_slice",
+      "serviceName": "orders",
+      "workloadLinked": true,
+      "transparentProxy": "unknown"
+    },
+    "stop": {
+      "state": "confirmed",
+      "channel": "connected",
+      "inProcess": true
+    }
+  },
+  "autoscaler": {
+    "hpa": { "discovery": "read", "state": "absent" },
+    "vpa": { "discovery": "read", "state": "absent" }
+  },
+  "load": {
+    "executed": true,
+    "termination": "duration_elapsed",
+    "requests": 4,
+    "httpErrors": 0,
+    "actualRps": 4,
+    "httpErrorRate": 0,
+    "latency": {
+      "semantics": "until_response_headers",
+      "p50Ns": { "state": "known", "nanoseconds": 1000000 },
+      "p95Ns": { "state": "known", "nanoseconds": 2000000 },
+      "p99Ns": { "state": "known", "nanoseconds": 3000000 }
+    },
+    "usefulThroughputRps": null,
+    "droppedIterations": null,
+    "generatorSaturated": null,
+    "interval": {
+      "startedAt": "2026-10-18T12:00:00Z",
+      "finishedAt": "2026-10-18T12:00:01Z",
+      "clock": "collector_local"
+    }
+  },
+  "windows": [],
+  "coverage": {
+    "expectedPodUids": ["d2222222-2222-4222-8222-222222222222"],
+    "podsWithMetrics": ["d2222222-2222-4222-8222-222222222222"],
+    "complete": true,
+    "independentWindowCount": 0,
+    "discardedWindowCount": 0
+  }
+}

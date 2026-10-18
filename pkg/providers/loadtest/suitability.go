@@ -15,7 +15,11 @@ import (
 // not permission to skip it.
 func AssessSuitability(req Request, spec AdapterSpec, out Outcome) Suitability {
 	if !out.Executed {
-		return Suitability{Reasons: []string{"load did not start"}}
+		reasons := []string{"load did not start"}
+		if req.StrictDirect {
+			reasons = append(reasons, "strict direct experiment did not start")
+		}
+		return Suitability{Reasons: reasons}
 	}
 	var reasons []string
 	if out.Partial || out.Termination != TerminationDurationElapsed {
@@ -27,8 +31,10 @@ func AssessSuitability(req Request, spec AdapterSpec, out Outcome) Suitability {
 	reasons = append(reasons, checkReasons(out)...)
 	reasons = append(reasons, saturationReasons(out)...)
 	reasons = append(reasons, phaseReasons(req, out)...)
+	reasons = append(reasons, presentedRouteProblems(out)...)
+	reasons = append(reasons, strictDirectProblems(req, out)...)
 	if len(reasons) > 0 {
-		return Suitability{Reasons: reasons}
+		return Suitability{Reasons: dedupe(reasons)}
 	}
 	return Suitability{Usable: true}
 }
@@ -84,6 +90,12 @@ func signalPresent(capability Capability, out Outcome) bool {
 		return out.Measured != nil && !out.Measured.StartedAt.IsZero() && !out.Measured.FinishedAt.IsZero()
 	case CapabilityWarmupCooldown, CapabilityCancellation:
 		return true
+	case CapabilityDirectRouteProof:
+		return out.Route.Mode == RouteDirectPod && out.Route.Status == AssuranceVerified && len(DirectProofGaps(out)) == 0
+	case CapabilityInClusterRunner:
+		return out.Runner.Identity.Placement == PlacementInCluster && out.Runner.Identity.Source == RunnerSourceObserved && uidKnown(out.Runner.Identity.PodUID, "")
+	case CapabilitySelectedPodMetrics:
+		return out.Metrics.Kind == ScopeSelectedPod && out.Metrics.Status == ScopeStatusVerified && out.Metrics.Attribution == AttributionPerPod
 	default:
 		return false
 	}
@@ -107,6 +119,12 @@ func signalUnknown(capability Capability, out Outcome) bool {
 		return out.Checks.State == SignalUnknown
 	case CapabilityLatencyUntilHeaders:
 		return out.Latency.Semantics == LatencyUnknown
+	case CapabilityDirectRouteProof:
+		return out.Route.Status == AssuranceUnknown || out.Route.Mode == RouteUnknown
+	case CapabilityInClusterRunner:
+		return out.Runner.Identity.Placement == PlacementUnknown
+	case CapabilitySelectedPodMetrics:
+		return out.Metrics.Status == ScopeStatusUnknown
 	default:
 		return false
 	}
@@ -254,10 +272,14 @@ func measuredCompletionProblems(out Outcome) []string {
 	if out.Measured == nil {
 		return nil
 	}
-	if measured.Clock != ClockCollectorLocal || out.Measured.Clock != ClockCollectorLocal {
-		return []string{"measured phase clock is not collector_local"}
+	if measured.Clock == ClockCollectorLocal && out.Measured.Clock == ClockCollectorLocal {
+		return nil
 	}
-	return nil
+	if measured.Clock == out.Measured.Clock && (measured.Clock == ClockRunner || measured.Clock == ClockSource) &&
+		out.ClockMapping.Established() && out.ClockMapping.From == measured.Clock {
+		return nil
+	}
+	return []string{"measured phase clock is not collector_local and has no proven mapping"}
 }
 
 func phaseFinished(phase PhaseActual) bool {

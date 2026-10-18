@@ -14,10 +14,15 @@
 // interval. HTTP requests, generator iterations, and successful application
 // operations are different units and are not copied into each other.
 //
-// Counts, rates, and booleans use SignalKnown, SignalMissing, or SignalUnknown.
-// A missing or unknown signal is not a measured zero and not false. Zero HTTP
-// requests keep rates and latency at SignalMissing. A load that never started
-// has Executed false and a nil measured interval.
+// Counts, rates, ratios, durations, and booleans use SignalKnown, SignalMissing,
+// or SignalUnknown. A missing or unknown signal is not a measured zero and not
+// false. A known count or duration is not negative. A known rate is finite and
+// not negative. A known ratio is finite and in the range [0, 1]. Known HTTP
+// errors cannot exceed known HTTP requests. An out-of-range fact stays on the
+// outcome. It is not replaced with zero, missing, or unknown, and it is not a
+// usable measurement or a passed SLO. Zero HTTP requests keep rates and latency
+// at SignalMissing. A load that never started has Executed false and a nil
+// measured interval.
 //
 // # Phases
 //
@@ -36,7 +41,12 @@
 // load before Run returns.
 //
 // Legal phase order is warmup, then measured, then cooldown. Warmup and
-// cooldown are optional. Measured is required and occurs once. Warmup and
+// cooldown are optional in the plan. A usable duration_elapsed result still
+// has exactly one measured phase that started and finished. That requirement
+// does not depend on OnPhase or on listing measured_phase_boundaries in
+// Required. An empty phase plan means the measured phase, not permission to
+// skip it. The measured interval is that phase's actual start and finish.
+// A planned duration is not substituted for those timestamps. Warmup and
 // cooldown are outside measured statistics. An adapter that cannot separate
 // those phases must not claim warmup_cooldown_phases. Planned durations and
 // actual edge times are both kept. Actual times use the process wall clock,
@@ -46,7 +56,9 @@
 // Cancellation or a deadline before the first phase leaves Executed false,
 // termination context_canceled or context_deadline_exceeded, and no measured
 // interval. The same stop after a phase has started leaves Executed true and
-// may keep a partial outcome. After Run returns, that run's load has stopped.
+// may keep a partial outcome, including a warmup phase when measured never
+// started. That prefix is not filled in with a measured phase, and it is not
+// a usable measurement. After Run returns, that run's load has stopped.
 //
 // # Capabilities
 //
@@ -68,4 +80,8 @@
 // LatencyUntilResponseHeaders is the legacy client measurement: time until
 // http.Client.Do returns response headers, before the body is read. It is not
 // full-response latency and it is not k6's http_req_duration.
+// LatencyUnknown stays unknown. It does not become a known semantics value
+// and it does not publish known percentiles, including when HTTP requests
+// are positive. Those percentiles stay missing. An active p95 gate does not
+// pass on that outcome.
 package loadtest

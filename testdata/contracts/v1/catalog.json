@@ -718,6 +718,16 @@
       ]
     },
     {
+      "id": "invalid-successful-warmup-only",
+      "schema": "observations.schema.json",
+      "document": "invalid/successful-warmup-only.json",
+      "expect": "invalid",
+      "errorContains": [
+        "/load/phases",
+        "measured"
+      ]
+    },
+    {
       "id": "invalid-telemetry-validated-with-missing-signal",
       "schema": "runtime-findings.schema.json",
       "document": "invalid/telemetry-validated-with-missing-signal.json",
@@ -1624,6 +1634,24 @@
       "id": "valid-source-unverified-source-context",
       "schema": "source-context.schema.json",
       "document": "valid/source-unverified/source-context.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-unknown-latency-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/unknown-latency/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-warmup-cancelled-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/warmup-cancelled/observations.json",
+      "expect": "valid"
+    },
+    {
+      "id": "valid-warmup-internal-error-observations",
+      "schema": "observations.schema.json",
+      "document": "valid/warmup-internal-error/observations.json",
       "expect": "valid"
     }
   ]

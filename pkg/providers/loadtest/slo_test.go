@@ -491,6 +491,22 @@ func TestConformance(t *testing.T) {
 			t.Fatalf("reasons = %#v, want unknown rather than missing", outcome.Suitability.Reasons)
 		}
 	})
+
+	t.Run("measured phase is required without a callback", func(t *testing.T) {
+		testMeasuredPhaseRequired(t)
+	})
+
+	t.Run("warmup prefix stays diagnostic", func(t *testing.T) {
+		testWarmupPrefix(t)
+	})
+
+	t.Run("unknown latency keeps positive requests", func(t *testing.T) {
+		testUnknownLatencyWithRequests(t)
+	})
+
+	t.Run("invalid reported facts", func(t *testing.T) {
+		testReportedFacts(t)
+	})
 }
 
 func TestImportsStayEngineNeutral(t *testing.T) {
@@ -630,6 +646,472 @@ func assertPhaseOrder(t *testing.T, events []PhaseEvent, names []PhaseName) {
 			t.Fatalf("clock = %s", start.Clock)
 		}
 	}
+}
+
+func testMeasuredPhaseRequired(t *testing.T) {
+	t.Helper()
+	capabilities := append(successCapabilities(), CapabilityWarmupCooldown)
+	adapter := newFake(t, "fixture-engine", "1", capabilities, LatencyUntilResponseHeaders)
+	req := baseRequest(adapter.spec, nil)
+	req.OnPhase = nil
+	req.RequestedRPS = 100
+	req.Phases = []PhasePlan{
+		{Name: PhaseWarmup, Duration: 10 * time.Millisecond},
+		{Name: PhaseMeasured, Duration: 10 * time.Millisecond},
+	}
+	adapter.behavior = func(_ context.Context, session *Session) (TerminationReason, error) {
+		if err := session.StartPhase(PhaseWarmup); err != nil {
+			return TerminationInternalError, err
+		}
+		session.SetMeasurements(validMeasurements())
+		if err := session.FinishPhase(PhaseWarmup); err != nil {
+			return TerminationInternalError, err
+		}
+		return TerminationDurationElapsed, nil
+	}
+	outcome, err := adapter.Run(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !outcome.Executed || outcome.Partial || outcome.Termination != TerminationDurationElapsed || outcome.Measured != nil || outcome.Suitability.Usable {
+		t.Fatalf("warmup-only success = executed %v partial %v termination %s measured %#v suitability %#v", outcome.Executed, outcome.Partial, outcome.Termination, outcome.Measured, outcome.Suitability)
+	}
+	if !strings.Contains(strings.Join(outcome.Suitability.Reasons, " "), "measured phase is missing") {
+		t.Fatalf("reasons = %#v, want missing measured phase", outcome.Suitability.Reasons)
+	}
+	if outcome.HTTPRequests.Value != 100 || len(outcome.Phases) != 1 || outcome.Phases[0].Name != PhaseWarmup {
+		t.Fatalf("facts were rewritten: requests %#v phases %#v", outcome.HTTPRequests, outcome.Phases)
+	}
+	assessment, evalErr := EvaluateSLO(outcome, &SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 0, MaximumP95Latency: time.Second})
+	if evalErr != nil || !assessment.Passed {
+		t.Fatalf("numeric SLO = %#v, %v, want pass beside the missing measured phase", assessment, evalErr)
+	}
+	direct := AssessSuitability(req, adapter.spec, outcome)
+	if direct.Usable || !strings.Contains(strings.Join(direct.Reasons, " "), "measured phase is missing") {
+		t.Fatalf("direct suitability = %#v", direct)
+	}
+
+	adapter.behavior = func(_ context.Context, session *Session) (TerminationReason, error) {
+		for _, name := range []PhaseName{PhaseWarmup, PhaseMeasured} {
+			if err := session.StartPhase(name); err != nil {
+				return TerminationInternalError, err
+			}
+			if name == PhaseMeasured {
+				session.SetMeasurements(validMeasurements())
+			}
+			if err := session.FinishPhase(name); err != nil {
+				return TerminationInternalError, err
+			}
+		}
+		return TerminationDurationElapsed, nil
+	}
+	outcome, err = adapter.Run(context.Background(), req)
+	if err != nil || !outcome.Suitability.Usable || outcome.Measured == nil {
+		t.Fatalf("completed measured phase = err %v measured %#v suitability %#v", err, outcome.Measured, outcome.Suitability)
+	}
+	measured, ok := findPhase(outcome.Phases, PhaseMeasured)
+	if !ok || !outcome.Measured.StartedAt.Equal(measured.StartedAt) || !outcome.Measured.FinishedAt.Equal(measured.FinishedAt) {
+		t.Fatalf("measured %#v phase %#v", outcome.Measured, measured)
+	}
+
+	valid := validMeasuredOutcome()
+	if suitability := AssessSuitability(Request{}, AdapterSpec{}, valid); !suitability.Usable {
+		t.Fatalf("valid measured outcome = %#v", suitability)
+	}
+	missing := cloneOutcome(valid)
+	missing.Phases = nil
+	missing.Measured = nil
+	assertUnusable(t, Request{}, missing, "measured phase is missing")
+
+	unfinished := cloneOutcome(valid)
+	unfinished.Phases[0].FinishedAt = time.Time{}
+	unfinished.Measured = nil
+	assertUnusable(t, Request{}, unfinished, "measured phase did not finish")
+
+	repeated := cloneOutcome(valid)
+	repeated.Phases = append(repeated.Phases, repeated.Phases[0])
+	assertUnusable(t, Request{}, repeated, "measured phase is repeated")
+
+	contradictory := cloneOutcome(valid)
+	contradictory.Measured.FinishedAt = contradictory.Measured.StartedAt.Add(10 * time.Millisecond)
+	assertUnusable(t, Request{}, contradictory, "measured interval does not match the measured phase")
+}
+
+func testWarmupPrefix(t *testing.T) {
+	t.Helper()
+	capabilities := append(successCapabilities(), CapabilityWarmupCooldown)
+	adapter := newFake(t, "fixture-engine", "1", capabilities, LatencyUntilResponseHeaders)
+	req := baseRequest(adapter.spec, nil)
+	req.OnPhase = nil
+	req.Phases = []PhasePlan{
+		{Name: PhaseWarmup, Duration: 10 * time.Millisecond},
+		{Name: PhaseMeasured, Duration: 10 * time.Millisecond},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	adapter.behavior = func(ctx context.Context, session *Session) (TerminationReason, error) {
+		if err := session.StartPhase(PhaseWarmup); err != nil {
+			return TerminationInternalError, err
+		}
+		session.SetMeasurements(zeroRequestMeasurements())
+		cancel()
+		return TerminationFromContext(ctx), ctx.Err()
+	}
+	outcome, err := adapter.Run(ctx, req)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want cancellation", err)
+	}
+	assertWarmupPrefix(t, outcome, TerminationContextCanceled)
+
+	adapter.behavior = func(_ context.Context, session *Session) (TerminationReason, error) {
+		if err := session.StartPhase(PhaseWarmup); err != nil {
+			return TerminationInternalError, err
+		}
+		session.SetMeasurements(zeroRequestMeasurements())
+		if err := session.FinishPhase(PhaseWarmup); err != nil {
+			return TerminationInternalError, err
+		}
+		return TerminationInternalError, errors.New("generator failed during warmup")
+	}
+	outcome, err = adapter.Run(context.Background(), req)
+	if err == nil {
+		t.Fatal("Run() error = nil, want warmup failure")
+	}
+	assertWarmupPrefix(t, outcome, TerminationInternalError)
+}
+
+func testUnknownLatencyWithRequests(t *testing.T) {
+	t.Helper()
+	adapter := newFake(t, "fixture-engine", "1", successCapabilities(), LatencyUntilResponseHeaders)
+	adapter.behavior = func(_ context.Context, session *Session) (TerminationReason, error) {
+		if err := session.StartPhase(PhaseMeasured); err != nil {
+			return TerminationInternalError, err
+		}
+		session.SetMeasurements(Measurements{
+			HTTPRequests:     KnownCount(100),
+			HTTPErrors:       KnownCount(0),
+			HTTPErrorRate:    KnownRatio(0),
+			ActualThroughput: KnownRate(100),
+			TransportErrors:  MissingCount(),
+			LatencyP50:       MissingDuration(),
+			LatencyP95:       MissingDuration(),
+			LatencyP99:       MissingDuration(),
+		})
+		session.SetLatencySemantics(LatencyUnknown)
+		return TerminationDurationElapsed, nil
+	}
+	req := baseRequest(adapter.spec, nil)
+	req.OnPhase = nil
+	outcome, err := adapter.Run(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if outcome.Latency.Semantics != LatencyUnknown {
+		t.Fatalf("semantics = %s, want unknown", outcome.Latency.Semantics)
+	}
+	if outcome.HTTPRequests.Value != 100 || outcome.ActualThroughput.State != SignalKnown || outcome.ActualThroughput.Value != 100 {
+		t.Fatalf("requests %#v throughput %#v, want the reported facts kept", outcome.HTTPRequests, outcome.ActualThroughput)
+	}
+	for _, percentile := range []DurationSignal{outcome.Latency.P50, outcome.Latency.P95, outcome.Latency.P99} {
+		if percentile.State != SignalMissing {
+			t.Fatalf("percentile = %#v, want missing_signal rather than a known number", percentile)
+		}
+	}
+	if outcome.Suitability.Usable || !strings.Contains(strings.Join(outcome.Suitability.Reasons, " "), "unknown") {
+		t.Fatalf("suitability = %#v, want unknown semantics", outcome.Suitability)
+	}
+	assessment, evalErr := EvaluateSLO(outcome, &SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 0, MaximumP95Latency: time.Second})
+	if evalErr != nil || assessment.Passed || !strings.Contains(strings.Join(assessment.Violations, " "), "p95 latency") {
+		t.Fatalf("active latency SLO = %#v, %v", assessment, evalErr)
+	}
+}
+
+func testReportedFacts(t *testing.T) {
+	t.Helper()
+	active := SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 0, MaximumP95Latency: time.Second}
+	cases := []struct {
+		name   string
+		mutate func(*Outcome)
+		slo    SLO
+		reason string
+		pass   bool
+	}{
+		{
+			name:   "negative error ratio",
+			mutate: func(out *Outcome) { out.HTTPErrorRate = KnownRatio(-1) },
+			slo:    SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 1, MaximumP95Latency: time.Second},
+			reason: "HTTP error rate is not a finite ratio from 0 to 1",
+		},
+		{
+			name:   "negative p95",
+			mutate: func(out *Outcome) { out.Latency.P95 = KnownDuration(-time.Second) },
+			slo:    SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 0, MaximumP95Latency: 0},
+			reason: "p95 latency is negative",
+		},
+		{
+			name: "errors exceed requests",
+			mutate: func(out *Outcome) {
+				out.HTTPRequests = KnownCount(100)
+				out.HTTPErrors = KnownCount(200)
+				out.HTTPErrorRate = KnownRatio(0)
+			},
+			slo:    active,
+			reason: "HTTP errors exceed HTTP requests",
+		},
+		{
+			name:   "negative request count",
+			mutate: func(out *Outcome) { out.HTTPRequests = KnownCount(-1) },
+			slo:    active,
+			reason: "HTTP requests count is negative",
+		},
+		{
+			name:   "negative error count",
+			mutate: func(out *Outcome) { out.HTTPErrors = KnownCount(-1) },
+			slo:    active,
+			reason: "HTTP errors count is negative",
+		},
+		{
+			name:   "negative transport errors",
+			mutate: func(out *Outcome) { out.TransportErrors = KnownCount(-1) },
+			slo:    active,
+			reason: "transport errors count is negative",
+		},
+		{
+			name:   "negative status count",
+			mutate: func(out *Outcome) { out.StatusCodes = map[int]int{200: -1} },
+			slo:    active,
+			reason: "HTTP status 200 count is negative",
+		},
+		{
+			name:   "negative p50",
+			mutate: func(out *Outcome) { out.Latency.P50 = KnownDuration(-time.Millisecond) },
+			slo:    active,
+			reason: "p50 latency is negative",
+		},
+		{
+			name:   "error ratio above one",
+			mutate: func(out *Outcome) { out.HTTPErrorRate = KnownRatio(1.1) },
+			slo:    SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 1, MaximumP95Latency: time.Second},
+			reason: "HTTP error rate is not a finite ratio from 0 to 1",
+		},
+		{
+			name:   "negative dropped work",
+			mutate: func(out *Outcome) { out.DroppedWork = KnownCount(-1) },
+			slo:    active,
+			reason: "dropped work count is negative",
+		},
+		{
+			name:   "negative throughput",
+			mutate: func(out *Outcome) { out.ActualThroughput = KnownRate(-1) },
+			slo:    SLO{MinimumRPS: 0, MaximumHTTPErrorRate: 0, MaximumP95Latency: time.Second},
+			reason: "actual throughput is not a finite non-negative rate",
+		},
+		{
+			name:   "negative useful throughput",
+			mutate: func(out *Outcome) { out.UsefulThroughput = KnownRate(-1) },
+			slo:    active,
+			reason: "useful throughput is not a finite non-negative rate",
+		},
+		{
+			name:   "NaN throughput",
+			mutate: func(out *Outcome) { out.ActualThroughput = KnownRate(math.NaN()) },
+			slo:    active,
+			reason: "actual throughput is not a finite non-negative rate",
+		},
+		{
+			name:   "infinite throughput",
+			mutate: func(out *Outcome) { out.ActualThroughput = KnownRate(math.Inf(1)) },
+			slo:    active,
+			reason: "actual throughput is not a finite non-negative rate",
+		},
+		{
+			name:   "negative infinite throughput",
+			mutate: func(out *Outcome) { out.ActualThroughput = KnownRate(math.Inf(-1)) },
+			slo:    active,
+			reason: "actual throughput is not a finite non-negative rate",
+		},
+		{
+			name:   "NaN error ratio",
+			mutate: func(out *Outcome) { out.HTTPErrorRate = KnownRatio(math.NaN()) },
+			slo:    active,
+			reason: "HTTP error rate is not a finite ratio from 0 to 1",
+		},
+		{
+			name:   "infinite error ratio",
+			mutate: func(out *Outcome) { out.HTTPErrorRate = KnownRatio(math.Inf(1)) },
+			slo:    active,
+			reason: "HTTP error rate is not a finite ratio from 0 to 1",
+		},
+		{
+			name:   "zero error ratio",
+			mutate: func(out *Outcome) { out.HTTPErrorRate = KnownRatio(0) },
+			slo:    active,
+			pass:   true,
+		},
+		{
+			name: "error ratio one",
+			mutate: func(out *Outcome) {
+				out.HTTPErrors = KnownCount(100)
+				out.HTTPErrorRate = KnownRatio(1)
+			},
+			slo:  SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 1, MaximumP95Latency: time.Second},
+			pass: true,
+		},
+		{
+			name: "zero latency",
+			mutate: func(out *Outcome) {
+				out.Latency.P50 = KnownDuration(0)
+				out.Latency.P95 = KnownDuration(0)
+				out.Latency.P99 = KnownDuration(0)
+			},
+			slo:  active,
+			pass: true,
+		},
+		{
+			name:   "zero throughput with the rate gate disabled",
+			mutate: func(out *Outcome) { out.ActualThroughput = KnownRate(0) },
+			slo:    SLO{MinimumRPS: 0, MaximumHTTPErrorRate: 0, MaximumP95Latency: time.Second},
+			pass:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := cloneOutcome(validMeasuredOutcome())
+			tc.mutate(&out)
+			suitability := AssessSuitability(Request{}, AdapterSpec{}, out)
+			assessment, err := EvaluateSLO(out, &tc.slo)
+			if err != nil {
+				t.Fatalf("EvaluateSLO() error = %v, want an assessment", err)
+			}
+			if tc.pass {
+				if !suitability.Usable || !assessment.Passed || assessment.Status != SLOPassed {
+					t.Fatalf("suitability %#v SLO %#v, want usable and passed", suitability, assessment)
+				}
+				return
+			}
+			if suitability.Usable || !strings.Contains(strings.Join(suitability.Reasons, " "), tc.reason) {
+				t.Fatalf("suitability = %#v, want %q", suitability, tc.reason)
+			}
+			if assessment.Passed || assessment.Status != SLOFailed || !strings.Contains(strings.Join(assessment.Violations, " "), tc.reason) {
+				t.Fatalf("SLO = %#v, want %q", assessment, tc.reason)
+			}
+		})
+	}
+
+	bare := sampleOutcome()
+	bare.HTTPErrorRate = KnownRatio(-1)
+	assessment, err := EvaluateSLO(bare, &SLO{MinimumRPS: 90, MaximumHTTPErrorRate: 1, MaximumP95Latency: 0})
+	if err != nil || assessment.Passed || !strings.Contains(strings.Join(assessment.Violations, " "), "HTTP error rate") {
+		t.Fatalf("phaseless EvaluateSLO() = %#v, %v", assessment, err)
+	}
+	if strings.Contains(strings.Join(assessment.Violations, " "), "phase") {
+		t.Fatalf("fact check required phases: %q", assessment.Violations)
+	}
+	assessment, err = EvaluateSLO(bare, nil)
+	if err != nil || assessment.Passed || assessment.Status != SLONotEvaluated {
+		t.Fatalf("nil SLO = %#v, %v, want not_evaluated", assessment, err)
+	}
+	_, err = EvaluateSLO(bare, &SLO{MinimumRPS: math.NaN()})
+	if err == nil || !strings.Contains(err.Error(), "finite non-negative") {
+		t.Fatalf("threshold error = %v, want the documented threshold error", err)
+	}
+}
+
+func assertUnusable(t *testing.T, req Request, out Outcome, reason string) {
+	t.Helper()
+	suitability := AssessSuitability(req, AdapterSpec{}, out)
+	if suitability.Usable || !strings.Contains(strings.Join(suitability.Reasons, " "), reason) {
+		t.Fatalf("suitability = %#v, want %q", suitability, reason)
+	}
+}
+
+func assertWarmupPrefix(t *testing.T, outcome Outcome, reason TerminationReason) {
+	t.Helper()
+	if !outcome.Executed || !outcome.Partial || outcome.Termination != reason || outcome.Suitability.Usable || outcome.Measured != nil {
+		t.Fatalf("prefix = executed %v partial %v termination %s measured %#v suitability %#v", outcome.Executed, outcome.Partial, outcome.Termination, outcome.Measured, outcome.Suitability)
+	}
+	if strings.Contains(strings.Join(outcome.Suitability.Reasons, " "), "measured phase is missing") {
+		t.Fatalf("reasons = %#v, cancellation should keep the prefix diagnostic", outcome.Suitability.Reasons)
+	}
+	if len(outcome.Phases) != 1 || outcome.Phases[0].Name != PhaseWarmup {
+		t.Fatalf("phases = %#v, want the warmup phase that ran", outcome.Phases)
+	}
+	phase := outcome.Phases[0]
+	if phase.StartedAt.IsZero() || phase.FinishedAt.IsZero() || phase.FinishedAt.Before(phase.StartedAt) || phase.Clock != ClockCollectorLocal {
+		t.Fatalf("warmup phase = %#v", phase)
+	}
+	if outcome.HTTPRequests.State != SignalKnown || outcome.HTTPRequests.Value != 0 || outcome.HTTPErrors.Value != 0 {
+		t.Fatalf("requests = %#v errors %#v", outcome.HTTPRequests, outcome.HTTPErrors)
+	}
+	if outcome.ActualThroughput.State != SignalMissing || outcome.HTTPErrorRate.State != SignalMissing || outcome.Latency.P95.State != SignalMissing {
+		t.Fatalf("rates were invented: throughput %#v error rate %#v p95 %#v", outcome.ActualThroughput, outcome.HTTPErrorRate, outcome.Latency.P95)
+	}
+}
+
+func validMeasurements() Measurements {
+	return Measurements{
+		HTTPRequests:     KnownCount(100),
+		HTTPErrors:       KnownCount(0),
+		HTTPErrorRate:    KnownRatio(0),
+		ActualThroughput: KnownRate(100),
+		TransportErrors:  MissingCount(),
+		LatencyP50:       KnownDuration(time.Millisecond),
+		LatencyP95:       KnownDuration(time.Millisecond),
+		LatencyP99:       KnownDuration(time.Millisecond),
+	}
+}
+
+func zeroRequestMeasurements() Measurements {
+	return Measurements{
+		HTTPRequests:     KnownCount(0),
+		HTTPErrors:       KnownCount(0),
+		HTTPErrorRate:    MissingRatio(),
+		ActualThroughput: MissingRate(),
+		TransportErrors:  MissingCount(),
+		LatencyP50:       MissingDuration(),
+		LatencyP95:       MissingDuration(),
+		LatencyP99:       MissingDuration(),
+	}
+}
+
+func validMeasuredOutcome() Outcome {
+	started := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	finished := started.Add(time.Second)
+	return Outcome{
+		Executed:         true,
+		Termination:      TerminationDurationElapsed,
+		HTTPRequests:     KnownCount(100),
+		HTTPErrors:       KnownCount(0),
+		HTTPErrorRate:    KnownRatio(0),
+		ActualThroughput: KnownRate(100),
+		UsefulThroughput: KnownRate(100),
+		Latency: LatencyReport{
+			Semantics: LatencyUntilResponseHeaders,
+			P50:       KnownDuration(time.Millisecond),
+			P95:       KnownDuration(time.Millisecond),
+			P99:       KnownDuration(time.Millisecond),
+		},
+		Phases: []PhaseActual{{
+			Name:       PhaseMeasured,
+			StartedAt:  started,
+			FinishedAt: finished,
+			Clock:      ClockCollectorLocal,
+		}},
+		Measured: &Interval{
+			StartedAt:  started,
+			FinishedAt: finished,
+			Clock:      ClockCollectorLocal,
+		},
+	}
+}
+
+func cloneOutcome(out Outcome) Outcome {
+	out.Phases = append([]PhaseActual(nil), out.Phases...)
+	if out.Measured != nil {
+		measured := *out.Measured
+		out.Measured = &measured
+	}
+	return out
 }
 
 func sampleOutcome() Outcome {

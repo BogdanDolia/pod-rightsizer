@@ -46,6 +46,9 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/rejected-invalid/analysis.json` | Candidate `rejected` with evidence `invalid` and reason `identity_changed`. |
 | `valid/limit-transition/analysis.json` | CPU limit moves from `set` to `absent`. Memory limit moves from `absent` to `set`. |
 | `valid/load-cancelled-partial/observations.json` | The load started (`executed` true) and then ended with `context_canceled`. Requests, error rate, and known latency remain. |
+| `valid/warmup-cancelled/observations.json` | Cancellation during warmup. `executed` is true, termination is `context_canceled`, requests are 0, rates are null, latency is `missing_signal`, `interval` is null, and `phases` contains only the finished warmup phase. |
+| `valid/warmup-internal-error/observations.json` | The same warmup prefix with termination `internal_error`. No measured phase is invented. |
+| `valid/unknown-latency/observations.json` | `requests` is positive and the rates are known, while `latency.semantics` is `unknown` and every percentile is `missing_signal`. |
 | `valid/example-engine/run-spec.json` | Adapter id `example-engine`, not only `builtin-get` or `k6-wrapper`. Warmup and cooldown are requested, so `warmup_cooldown_phases` is required. |
 | `valid/provider-outcome/observations.json` | Actual warmup, measured, and cooldown bounds. Checks are `missing_signal`. Dropped work and saturation are null. `contractVersion` is `1`. |
 | `valid/identity-changed/` | Image digest changed inside the run. `identityStable` is false. Evidence `invalid` with `identity_changed`. |
@@ -83,6 +86,7 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/capability-shell-hook.json` | run spec | `shell_hook` is not a capability |
 | `invalid/checks-missing-with-passed.json` | observations | `missing_signal` checks cannot also carry `passed` |
 | `invalid/two-measured-phases.json` | observations | two measured phases are not a legal actual order |
+| `invalid/successful-warmup-only.json` | observations | `duration_elapsed` cannot record warmup alone |
 | `invalid/unknown-latency-known-p95.json` | observations | unknown latency semantics requires `missing_signal` percentiles |
 | `invalid/zero-encodes-missing-signal.json` | runtime findings | `missing_signal` cannot also carry `nanoseconds` |
 | `invalid/missing-signal-means-absent.json` | runtime findings | conclusion cannot be `problem_absent` |

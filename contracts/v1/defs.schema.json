@@ -638,11 +638,11 @@
       "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
     },
     "latencySemantics": {
-      "description": "Semantics of a reported latency. unknown means the semantics were not established. It is not until_response_headers and not a zero duration.",
+      "description": "Semantics of a reported latency. unknown means the semantics were not established. It is not until_response_headers and not a zero duration. Unknown keeps every percentile missing_signal, including when requests are positive.",
       "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable", "unknown"]
     },
     "actualPhase": {
-      "description": "Actual phase bounds on the collector clock. A planned duration does not prove these timestamps.",
+      "description": "Actual phase bounds on the collector clock. A planned duration does not prove these timestamps. A failed or cancelled run may record only the prefix that started.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "startedAt", "finishedAt", "clock"],

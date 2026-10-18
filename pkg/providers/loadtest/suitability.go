@@ -2,13 +2,17 @@ package loadtest
 
 import (
 	"fmt"
-	"time"
 )
 
 // AssessSuitability reports whether an outcome is usable as a successful
 // measurement. Numeric SLO failures are not suitability failures. A missing
-// required signal, unknown or incompatible latency semantics, failed
-// application checks, and confirmed generator saturation are.
+// required signal, a known fact outside the contract range, unknown or
+// incompatible latency semantics, failed application checks, confirmed
+// generator saturation, and a missing, unfinished, repeated, or contradictory
+// measured phase are. A usable duration_elapsed result needs one completed
+// measured phase even when the request has no phase callback and does not
+// list measured_phase_boundaries. An empty phase plan is that measured phase,
+// not permission to skip it.
 func AssessSuitability(req Request, spec AdapterSpec, out Outcome) Suitability {
 	if !out.Executed {
 		return Suitability{Reasons: []string{"load did not start"}}
@@ -18,6 +22,7 @@ func AssessSuitability(req Request, spec AdapterSpec, out Outcome) Suitability {
 		reasons = append(reasons, "load did not finish successfully")
 	}
 	reasons = append(reasons, signalReasons(req, out)...)
+	reasons = append(reasons, reportedFactProblems(out)...)
 	reasons = append(reasons, latencyReasons(req, spec, out)...)
 	reasons = append(reasons, checkReasons(out)...)
 	reasons = append(reasons, saturationReasons(out)...)
@@ -165,10 +170,9 @@ func saturationReasons(out Outcome) []string {
 }
 
 func phaseReasons(req Request, out Outcome) []string {
-	var reasons []string
-	if err := measuredBounds(out); err != nil {
-		reasons = append(reasons, err.Error())
-	}
+	reasons := phaseOrderProblems(out.Phases)
+	reasons = append(reasons, measuredBoundProblems(out)...)
+	reasons = append(reasons, measuredCompletionProblems(out)...)
 	for _, planned := range req.Phases {
 		if planned.Name != PhaseWarmup && planned.Name != PhaseCooldown {
 			continue
@@ -178,45 +182,104 @@ func phaseReasons(req Request, out Outcome) []string {
 			reasons = append(reasons, fmt.Sprintf("planned %s phase did not run", planned.Name))
 		}
 	}
-	if containsCapability(requiredCapabilities(req), CapabilityMeasuredPhase) &&
-		out.Termination == TerminationDurationElapsed &&
-		(out.Measured == nil || out.Measured.StartedAt.IsZero() || out.Measured.FinishedAt.Before(out.Measured.StartedAt)) {
-		reasons = append(reasons, "measured interval is missing")
+	return reasons
+}
+
+func phaseOrderProblems(phases []PhaseActual) []string {
+	var reasons []string
+	last := -1
+	seen := map[PhaseName]int{}
+	for _, phase := range phases {
+		rank, ok := phaseRank(phase.Name)
+		if !ok {
+			reasons = append(reasons, fmt.Sprintf("unknown load phase %q", phase.Name))
+			continue
+		}
+		seen[phase.Name]++
+		if rank <= last {
+			reasons = append(reasons, fmt.Sprintf("load phase %s is out of order", phase.Name))
+		}
+		last = rank
+		if !phase.StartedAt.IsZero() && !phase.FinishedAt.IsZero() && phase.FinishedAt.Before(phase.StartedAt) {
+			reasons = append(reasons, fmt.Sprintf("%s phase finished before it started", phase.Name))
+		}
+	}
+	for _, name := range []PhaseName{PhaseWarmup, PhaseMeasured, PhaseCooldown} {
+		if seen[name] > 1 {
+			reasons = append(reasons, fmt.Sprintf("%s phase is repeated", name))
+		}
 	}
 	return reasons
 }
 
-func measuredBounds(out Outcome) error {
-	var warmupFinish, measuredStart, measuredFinish, cooldownStart time.Time
-	var warmupSet, measuredStartSet, measuredFinishSet, cooldownSet bool
-	for _, phase := range out.Phases {
-		switch phase.Name {
-		case PhaseWarmup:
-			warmupFinish = phase.FinishedAt
-			warmupSet = !phase.FinishedAt.IsZero()
-		case PhaseMeasured:
-			measuredStart = phase.StartedAt
-			measuredStartSet = !phase.StartedAt.IsZero()
-			measuredFinish = phase.FinishedAt
-			measuredFinishSet = !phase.FinishedAt.IsZero()
-		case PhaseCooldown:
-			cooldownStart = phase.StartedAt
-			cooldownSet = !phase.StartedAt.IsZero()
+func measuredBoundProblems(out Outcome) []string {
+	var reasons []string
+	warmup, warmupOK := singlePhase(out.Phases, PhaseWarmup)
+	measured, measuredOK := singlePhase(out.Phases, PhaseMeasured)
+	cooldown, cooldownOK := singlePhase(out.Phases, PhaseCooldown)
+	if warmupOK && measuredOK && !warmup.FinishedAt.IsZero() && !measured.StartedAt.IsZero() && measured.StartedAt.Before(warmup.FinishedAt) {
+		reasons = append(reasons, "measured phase overlaps warmup")
+	}
+	if cooldownOK && measuredOK && !cooldown.StartedAt.IsZero() && !measured.FinishedAt.IsZero() && cooldown.StartedAt.Before(measured.FinishedAt) {
+		reasons = append(reasons, "measured phase overlaps cooldown")
+	}
+	finished := measuredOK && phaseFinished(measured)
+	if finished {
+		if out.Measured == nil || !out.Measured.StartedAt.Equal(measured.StartedAt) || !out.Measured.FinishedAt.Equal(measured.FinishedAt) {
+			reasons = append(reasons, "measured interval does not match the measured phase")
 		}
+		return reasons
 	}
-	if warmupSet && measuredStartSet && measuredStart.Before(warmupFinish) {
-		return fmt.Errorf("measured phase overlaps warmup")
+	if out.Measured != nil {
+		reasons = append(reasons, "measured interval does not match the measured phase")
 	}
-	if cooldownSet && measuredFinishSet && cooldownStart.Before(measuredFinish) {
-		return fmt.Errorf("measured phase overlaps cooldown")
+	return reasons
+}
+
+func measuredCompletionProblems(out Outcome) []string {
+	if !out.Executed || out.Partial || out.Termination != TerminationDurationElapsed {
+		return nil
 	}
-	if out.Measured != nil && measuredStartSet && !out.Measured.StartedAt.Equal(measuredStart) {
-		return fmt.Errorf("measured interval does not match the measured phase")
+	measuredPhases := phasesNamed(out.Phases, PhaseMeasured)
+	if len(measuredPhases) == 0 {
+		return []string{"measured phase is missing"}
 	}
-	if out.Measured != nil && measuredFinishSet && !out.Measured.FinishedAt.Equal(measuredFinish) {
-		return fmt.Errorf("measured interval does not match the measured phase")
+	if len(measuredPhases) != 1 {
+		return nil
+	}
+	measured := measuredPhases[0]
+	if !phaseFinished(measured) {
+		return []string{"measured phase did not finish"}
+	}
+	if out.Measured == nil {
+		return nil
+	}
+	if measured.Clock != ClockCollectorLocal || out.Measured.Clock != ClockCollectorLocal {
+		return []string{"measured phase clock is not collector_local"}
 	}
 	return nil
+}
+
+func phaseFinished(phase PhaseActual) bool {
+	return !phase.StartedAt.IsZero() && !phase.FinishedAt.IsZero() && !phase.FinishedAt.Before(phase.StartedAt)
+}
+
+func singlePhase(phases []PhaseActual, name PhaseName) (PhaseActual, bool) {
+	found := phasesNamed(phases, name)
+	if len(found) != 1 {
+		return PhaseActual{}, false
+	}
+	return found[0], true
+}
+
+func phasesNamed(phases []PhaseActual, name PhaseName) []PhaseActual {
+	var found []PhaseActual
+	for _, phase := range phases {
+		if phase.Name == name {
+			found = append(found, phase)
+		}
+	}
+	return found
 }
 
 func findPhase(phases []PhaseActual, name PhaseName) (PhaseActual, bool) {
@@ -226,13 +289,4 @@ func findPhase(phases []PhaseActual, name PhaseName) (PhaseActual, bool) {
 		}
 	}
 	return PhaseActual{}, false
-}
-
-func containsCapability(capabilities []Capability, capability Capability) bool {
-	for _, candidate := range capabilities {
-		if candidate == capability {
-			return true
-		}
-	}
-	return false
 }

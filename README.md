@@ -98,7 +98,7 @@ The public GitHub Pages site is a static project guide with an illustrative poli
 - `--memory-limit-multiplier`: memory multiplier for a multiplier policy (default `1.2`).
 - `--min-samples`: minimum independent Metrics API windows (default `3`, minimum `2`).
 - `--output-format`: `text`, `json`, or `yaml`.
-- `--kubeconfig`: kubeconfig path; otherwise in-cluster/default kubeconfig resolution is used.
+- `--kubeconfig`: explicit kubeconfig path. Without it, in-cluster configuration is tried first, then `KUBECONFIG` (a file or path list), then `~/.kube/config` when `KUBECONFIG` is unset.
 
 `request-multiplier` multiplies the recommended request. `peak-multiplier` multiplies observed peak usage, but the resulting limit is never allowed below its request. `keep` preserves the current limit unless it would fall below the new request. `none` removes the configured limit.
 
@@ -208,6 +208,8 @@ Run the HTTP service and open `http://localhost:8080/`:
 ```bash
 go run ./cmd/advisor-api
 ```
+
+For a local cluster with a separate kubeconfig, set `KUBECONFIG` when starting the API, for example `KUBECONFIG=/absolute/path/to/kubeconfig go run ./cmd/advisor-api`. The API uses that file's current context.
 
 Create an analysis:
 

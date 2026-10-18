@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
@@ -60,22 +58,22 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 	var config *rest.Config
 	var err error
 
-	// Try to use in-cluster config if no kubeconfig path provided
+	// Explicit paths take precedence. Otherwise keep in-cluster discovery first.
 	if kubeconfigPath == "" {
 		config, err = rest.InClusterConfig()
-		if err != nil {
-			// Fall back to kubeconfig file if not in cluster
-			if home := homedir.HomeDir(); home != "" {
-				kubeconfigPath = filepath.Join(home, ".kube", "config")
-			} else {
-				return nil, fmt.Errorf("could not find kubeconfig file and not running in-cluster")
-			}
-		}
 	}
 
-	// If we need to use kubeconfig file
+	// Use client-go's standard file loading rules: KUBECONFIG (including a
+	// path list), or ~/.kube/config when the environment variable is unset.
 	if config == nil {
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if kubeconfigPath != "" {
+			config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		} else {
+			config, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+				clientcmd.NewDefaultClientConfigLoadingRules(),
+				&clientcmd.ConfigOverrides{},
+			).ClientConfig()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("error building kubeconfig: %v", err)
 		}

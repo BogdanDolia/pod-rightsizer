@@ -24,6 +24,8 @@ Verified on the historical base `324d1c52b3c38345380395eb13cccddd49e8adf9`, whic
 
 These shapes cannot be the v1 contract. One boolean, or the current `status` plus `patchDryRun`, collapses execution, evidence, SLO, source, candidate, and patch into a single success.
 
+T03 closes the provider row in code. The load contract and the metrics sample now keep the outcome, phase bounds, source window, and coverage that row said were dropped. The CLI and Advisor API still call the legacy tester and collector directly. Switching them is T04. T03 does not add a UID, owner chain, or image digest; that remains T05.
+
 ## 2. Decision
 
 One versioned document family in `contracts/v1`, draft 2020-12, shared by the future CLI, API, and assistant handoff. There is no plugin framework and no separate result model per interface.
@@ -190,7 +192,7 @@ Observations:
 - `identityStable` is true only when discovery is `read` and UID, generation, image digest, container restart, and replica count are all unchanged. Any of those changes makes the run's evidence invalid for MVP. The deferred T05 join applies `identity_changed` only to that read case. `not_obtained` and `partial` stay false without `identity_changed`.
 - Service mapping is `verified` only with `routeProof: endpoint_slice`. `declared_only` and `none` are unverified.
 - A discarded window has a reason (`duplicate_poll`, `overlapping_window`, `outside_measured_interval`, `missing_pod`, `identity_changed`, `container_restart`, `conflicting_snapshot`). An accepted window has a null discard reason.
-- The schema does not recompute independent counts or the max-fold. That is T03 and T09.
+- The schema does not recompute independent counts or the max-fold. `pkg/metrics.ClassifyWindows` does that fold. T09 replays the stored inputs. The fixture window values stay pre-fold.
 
 ## 5. Versioning
 
@@ -207,6 +209,8 @@ Observations:
 Before the first release that ships these schemas, a later task may edit `1.0.0` together with the fixtures. After that release, an incompatible change bumps the major version and lives in a new directory. An additive change bumps the minor version. Old readers reject the unknown version because the const does not match. New fields are not silently ignored.
 
 T02 keeps `schemaVersion` `1.0.0`. No git tag has been published, the CLI and Advisor API do not emit these documents, and the GoReleaser archives do not contain `contracts/v1`. Replacing `pending_t02` with the shared `nodeSupport` pin is an in-place clarification of the unshipped schema, together with the fixtures. It does not relax execution, evidence, source, or comparison gates.
+
+T03 keeps `schemaVersion` `1.0.0` for the same shipping fact, rechecked on this branch: `git tag` and `git ls-remote --tags origin` are empty, and `.goreleaser.yml` archive files are `LICENSE`, `README.md`, and `web/ui/**`. Adapter ids, capabilities, actual phases, checks, and `unknown` latency are clarifications of that unshipped document. `wrapper.name` stays the field name so existing fixtures remain valid. The closed enum `builtin-get | k6-wrapper | none` is replaced by the `componentId` pattern. An id that matches the pattern is not registered until `pkg/providers/loadtest.Register` accepts it. `builtin-get` / `legacy-1` remains a valid historical identity. It is the temporary local adapter, removed in T10, not a generator this contract promises to keep.
 
 An unknown profile id, framework, intent, or verdict is a schema change, not an open string.
 
@@ -255,10 +259,10 @@ API evolution is a new `/api/v1/` surface. `POST /api/analyze` and `GET /api/run
 | `output.Result` JSON, YAML, and text | `Analysis` plus rendered `report.md` | T07. Stdout stays legacy until an explicit versioned output is selected. |
 | `server.AnalyzeRequest`, `RunStatus` | `RunSpec`, `Analysis` under `/api/v1/` | T04 and T07. Old routes unchanged. |
 | `recommender.Policy`, `Recommendations`, `ObservedStatistics`, `Confidence` | `policy`, `recommendation`, `replayInputs`, `evidenceConfidence` | T09. Formula unchanged. |
-| `loadtest.RunResult`, percent flag versus ratio SLO | `observations.load`, `Analysis.slo` | T04. Latency remains until response headers for `builtin-get` / `legacy-1`. |
-| Collector windows, `IndependentSamples`, `FullyContainedSamples` | `observations.windows` and discard reasons | T03. |
-| `kubernetes.Workload`, `ResourceSettings`, strategic merge patch | workload identity, `resourceSetting`, `patch` | T05 and T07. `null` in YAML remains the absent-limit encoding. |
-| `metrics.Sample` and `loadtest.Run` error-only adapters | full observations | T03 and T04. T01 does not change the adapters. |
+| `loadtest.RunResult`, percent flag versus ratio SLO | `observations.load`, `Analysis.slo` | T04 wires the pipeline. Numeric SLO gates already live in `pkg/providers/loadtest`. Latency remains until response headers for `builtin-get` / `legacy-1`. |
+| Collector windows, `IndependentSamples`, `FullyContainedSamples` | `observations.windows` and discard reasons | T03 classifies windows in Go. The schema still does not recompute the fold. |
+| `kubernetes.Workload`, `ResourceSettings`, strategic merge patch | workload identity, `resourceSetting`, `patch` | T05 and T07. `null` in YAML remains the absent-limit encoding. T03 stores a UID only when the object that was read has one. |
+| `metrics.Sample` and `loadtest.Run` error-only adapters | provider outcome and metric provenance | T03. CLI and API orchestration stay on the legacy tester until T04. |
 | `knowledge.Evaluate` strings | not migrated | T12 replaces them with rule records. T01 does not call them. |
 
 Package file names, fixed: `run-spec.json`, `observations.json`, `analysis.json`, `runtime-findings.json`, `source-context.json`, `manifest.json`, `report.md`, `agent-brief.md`, `resource-patch.yaml`. Comparison documents live outside the run package.
@@ -283,12 +287,12 @@ Adjacent notes, owned by the next task rather than fixed here:
 | Item | Owner |
 | --- | --- |
 | Node.js LTS line and base image | Decided in T02. Line `24`, fixture patch `24.22.0`, image `node:24.22.0-bookworm-slim`. See `test/fixtures/node-http/README.md`. |
-| k6 wrapper version and canonical scenario id. `builtin-get` / `legacy-1` remains the legacy scenario. | T10 |
+| External k6, measured-phase orchestration, and deletion of the temporary `builtin-get` adapter and `pkg/loadtest`. Historical documents may keep that identity. | T10 |
 | Numeric noise budget | T14 after T02 and T18 |
 | Float replay equality against `GenerateRecommendations` | T09 |
 | `/api/v1/` implementation | T04 and T07 |
 | Manifest byte verification and secret scanning of free text | T08 |
-| Cross-file joins listed in `testdata/contracts/v1/semantic-checks.json` | T03 through T16, `executedBy` is `none` |
+| Cross-file joins listed in `testdata/contracts/v1/semantic-checks.json` | T04 through T16 stay `executedBy: none`. T03 names a Go test only for the window fold, the load-provider conformance suite, and metrics provenance. |
 | Whether a pilot can produce `reproducible_build_record`. Until that is proven, review export stays blocked unless source is `verified`. | T16 may revisit the ready-export rule only with a schema change |
 
 ### How to check the fixtures

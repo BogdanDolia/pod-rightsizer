@@ -41,7 +41,10 @@ func New(kubeconfigPath string, samplingInterval time.Duration) (*Provider, erro
 }
 
 // Collect samples current resource usage over the given observation window.
-func (p *Provider) Collect(ctx context.Context, namespace, deployment, container string, since time.Duration) ([]providermetrics.Sample, error) {
+// A poll error or cancellation returns the samples already read, with Partial
+// set, together with the error. A first poll that produced no facts returns
+// no samples.
+func (p *Provider) Collect(ctx context.Context, namespace, deployment, container string, since time.Duration) (providermetrics.Collection, error) {
 	if since <= 0 {
 		since = 30 * time.Second
 	}
@@ -50,7 +53,7 @@ func (p *Provider) Collect(ctx context.Context, namespace, deployment, container
 	var samples []providermetrics.Sample
 	workload, err := p.client.ResolveWorkload(ctx, namespace, deployment, container)
 	if err != nil {
-		return nil, err
+		return providermetrics.Collection{}, err
 	}
 
 	deadline := time.Now().Add(since)
@@ -58,16 +61,19 @@ func (p *Provider) Collect(ctx context.Context, namespace, deployment, container
 	defer ticker.Stop()
 
 	for {
-		// Collect one sample immediately on first iteration
 		snapshot, err := p.client.GetPodMetrics(ctx, namespace, workload)
 		if err != nil {
-			return nil, err
+			if sample, ok := sampleFromSnapshot(snapshot); ok {
+				samples = append(samples, sample)
+			}
+			return providermetrics.Collection{
+				Samples: samples,
+				Partial: len(samples) > 0,
+			}, err
 		}
-		samples = append(samples, providermetrics.Sample{
-			Timestamp: snapshot.Timestamp,
-			CPUm:      snapshot.CPUUsage * 1000.0, // convert cores to millicores
-			MemoryMi:  snapshot.MemoryUsage,
-		})
+		if sample, ok := sampleFromSnapshot(snapshot); ok {
+			samples = append(samples, sample)
+		}
 
 		if time.Now().After(deadline) {
 			break
@@ -75,11 +81,30 @@ func (p *Provider) Collect(ctx context.Context, namespace, deployment, container
 
 		select {
 		case <-ctx.Done():
-			return samples, ctx.Err()
+			return providermetrics.Collection{Samples: samples, Partial: len(samples) > 0}, ctx.Err()
 		case <-ticker.C:
-			// loop
 		}
 	}
 
-	return samples, nil
+	return providermetrics.Collection{Samples: samples, Partial: false}, nil
+}
+
+func sampleFromSnapshot(snapshot corek8s.ContainerMetrics) (providermetrics.Sample, bool) {
+	if len(snapshot.Pods) == 0 && snapshot.Timestamp.IsZero() {
+		return providermetrics.Sample{}, false
+	}
+	return providermetrics.Sample{
+		Timestamp:       snapshot.Timestamp,
+		SourceTimestamp: snapshot.Timestamp,
+		SourceWindow:    snapshot.Window,
+		PolledAt:        snapshot.PolledAt,
+		ContainerName:   snapshot.ContainerName,
+		CPUm:            snapshot.CPUUsage * 1000.0,
+		MemoryMi:        snapshot.MemoryUsage,
+		Pods:            snapshot.Pods,
+		Coverage:        snapshot.Coverage,
+		Workload:        snapshot.Workload,
+		CPUSourcePod:    snapshot.CPUSourcePod,
+		MemorySourcePod: snapshot.MemorySourcePod,
+	}, true
 }

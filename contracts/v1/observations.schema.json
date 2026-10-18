@@ -172,21 +172,45 @@
           "additionalProperties": false,
           "required": ["semantics", "p50Ns", "p95Ns", "p99Ns"],
           "properties": {
-            "semantics": {
-              "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
-            },
+            "semantics": { "$ref": "defs.schema.json#/$defs/latencySemantics" },
             "p50Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" },
             "p95Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" },
             "p99Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" }
           }
         },
-        "usefulThroughputRps": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "usefulThroughputRps": {
+          "description": "Null means not reported. A number is a measurement, including zero. unknown is a separate state.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "number", "minimum": 0 },
+            { "$ref": "defs.schema.json#/$defs/unknownSignal" }
+          ]
+        },
         "droppedIterations": {
-          "description": "Null until a wrapper reports it. Zero would claim no iterations were dropped.",
-          "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }]
+          "description": "Null means the adapter did not report dropped work. Zero would claim no work was dropped. unknown is not zero.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0 },
+            { "$ref": "defs.schema.json#/$defs/unknownSignal" }
+          ]
         },
         "generatorSaturated": {
-          "oneOf": [{ "type": "null" }, { "type": "boolean" }]
+          "description": "Null means saturation was not reported. false is a measured false. unknown is not false.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "boolean" },
+            { "$ref": "defs.schema.json#/$defs/unknownSignal" }
+          ]
+        },
+        "checks": { "$ref": "defs.schema.json#/$defs/loadChecks" },
+        "contractVersion": { "const": "1" },
+        "adapter": { "$ref": "defs.schema.json#/$defs/componentIdentity" },
+        "engine": { "$ref": "defs.schema.json#/$defs/componentIdentity" },
+        "phases": {
+          "description": "Actual phase bounds. Warmup and cooldown are outside measured statistics. An empty array is allowed only when the load did not start.",
+          "type": "array",
+          "maxItems": 3,
+          "items": { "$ref": "defs.schema.json#/$defs/actualPhase" }
         },
         "interval": {
           "description": "Collector-local start and finish. This is not a Metrics API source window.",
@@ -255,7 +279,76 @@
               "termination": { "enum": ["not_started", "context_canceled", "invalid_configuration", "invalid_target"] },
               "requests": { "const": 0 },
               "httpErrors": { "const": 0 },
-              "interval": { "type": "null" }
+              "interval": { "type": "null" },
+              "phases": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "latency": {
+                "properties": { "semantics": { "const": "unknown" } },
+                "required": ["semantics"]
+              }
+            },
+            "required": ["latency"]
+          },
+          "then": {
+            "properties": {
+              "latency": {
+                "properties": {
+                  "p50Ns": { "properties": { "state": { "const": "missing_signal" } } },
+                  "p95Ns": { "properties": { "state": { "const": "missing_signal" } } },
+                  "p99Ns": { "properties": { "state": { "const": "missing_signal" } } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "phases": { "minItems": 1 } },
+            "required": ["phases"]
+          },
+          "then": {
+            "properties": {
+              "phases": {
+                "oneOf": [
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] }
+                    ],
+                    "maxItems": 1,
+                    "minItems": 1
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "warmup" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] }
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "cooldown" } }, "required": ["name"] }
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "warmup" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "cooldown" } }, "required": ["name"] }
+                    ],
+                    "minItems": 3,
+                    "maxItems": 3
+                  }
+                ]
+              }
             }
           }
         }

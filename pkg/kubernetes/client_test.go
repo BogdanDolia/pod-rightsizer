@@ -137,6 +137,29 @@ func TestGetPodMetricsUsesOnlyExplicitContainer(t *testing.T) {
 	if metrics.Window != 30*time.Second {
 		t.Fatalf("Window = %s, want source envelope window 30s", metrics.Window)
 	}
+	if metrics.PolledAt.IsZero() || metrics.PolledAt.Equal(metrics.Timestamp) {
+		t.Fatalf("PolledAt = %s, want a local poll time distinct from the source timestamp", metrics.PolledAt)
+	}
+	if metrics.CPUSourcePod != "payments-def" || metrics.MemorySourcePod != "payments-def" {
+		t.Fatalf("source pods = %s/%s, want payments-def for both maxima", metrics.CPUSourcePod, metrics.MemorySourcePod)
+	}
+	if !metrics.Coverage.Assessed || !metrics.Coverage.Complete || metrics.Coverage.Expected != 2 || metrics.Coverage.Observed != 2 || len(metrics.Coverage.Missing) != 0 {
+		t.Fatalf("coverage = %#v, want a complete 2-pod census", metrics.Coverage)
+	}
+	if metrics.Workload.DeploymentUIDObserved || metrics.Workload.DeploymentUID != "" {
+		t.Fatalf("workload UID = %#v, want no invented UID", metrics.Workload)
+	}
+	if len(metrics.Pods) != 2 {
+		t.Fatalf("pods = %#v, want both replica readings", metrics.Pods)
+	}
+	for _, pod := range metrics.Pods {
+		if pod.UID != "" {
+			t.Fatalf("pod %s UID = %q, want empty when the API object has none", pod.Name, pod.UID)
+		}
+		if pod.SourceTimestamp.IsZero() || pod.SourceWindow <= 0 {
+			t.Fatalf("pod %s lost its source window: %#v", pod.Name, pod)
+		}
+	}
 }
 
 func TestResolveWorkloadRejectsUnstableRollout(t *testing.T) {
@@ -319,9 +342,54 @@ func TestGetPodMetricsRejectsPartialReplicaCoverage(t *testing.T) {
 		t.Fatalf("ResolveWorkload() error = %v", err)
 	}
 
-	_, err = client.GetPodMetrics(context.Background(), "shop", workload)
+	snapshot, err := client.GetPodMetrics(context.Background(), "shop", workload)
 	if err == nil || !strings.Contains(err.Error(), "metrics missing") {
 		t.Fatalf("GetPodMetrics() error = %v, want missing replica metrics", err)
+	}
+	if snapshot.Coverage.Complete || snapshot.Coverage.Expected != 2 || snapshot.Coverage.Observed != 1 {
+		t.Fatalf("coverage = %#v, want incomplete facts with the error", snapshot.Coverage)
+	}
+	if len(snapshot.Pods) != 1 || snapshot.Pods[0].Name != "payments-abc" || snapshot.CPUUsage != 0.1 {
+		t.Fatalf("partial snapshot = %#v, want the replica that was read", snapshot.Pods)
+	}
+	if snapshot.Workload.DeploymentUIDObserved {
+		t.Fatalf("partial snapshot invented deployment UID %q", snapshot.Workload.DeploymentUID)
+	}
+}
+
+func TestGetPodMetricsKeepsObservedUIDs(t *testing.T) {
+	deployment := testDeployment()
+	deployment.UID = "11111111-1111-1111-1111-111111111111"
+	pod := testPod("payments-abc", map[string]string{
+		"component": "payments",
+		"track":     "stable",
+	})
+	pod.UID = "22222222-2222-2222-2222-222222222222"
+	client := newTestClient(
+		t,
+		[]runtime.Object{deployment, pod},
+		[]runtime.Object{testPodMetrics("payments-abc", map[string]string{
+			"component": "payments",
+			"track":     "stable",
+		}, "100m", "64Mi")},
+	)
+	workload, err := client.ResolveWorkload(context.Background(), "shop", "payments", "worker")
+	if err != nil {
+		t.Fatalf("ResolveWorkload() error = %v", err)
+	}
+	if workload.DeploymentUID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("DeploymentUID = %q, want the UID that was read", workload.DeploymentUID)
+	}
+
+	snapshot, err := client.GetPodMetrics(context.Background(), "shop", workload)
+	if err != nil {
+		t.Fatalf("GetPodMetrics() error = %v", err)
+	}
+	if !snapshot.Workload.DeploymentUIDObserved || snapshot.Workload.DeploymentUID != workload.DeploymentUID {
+		t.Fatalf("workload observation = %#v, want the read deployment UID", snapshot.Workload)
+	}
+	if len(snapshot.Pods) != 1 || snapshot.Pods[0].UID != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("pod usage = %#v, want the read pod UID", snapshot.Pods)
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	contract "github.com/HelixThinker/pod-rightsizer/pkg/providers/loadtest"
 )
 
 const (
@@ -29,16 +31,17 @@ type Tester struct {
 	client      *http.Client
 }
 
-// TerminationReason describes why a load test stopped.
-type TerminationReason string
+// TerminationReason, SLO, and SLOAssessment are the shared provider contract.
+// These aliases keep the legacy generator compiling until T10 removes it.
+type TerminationReason = contract.TerminationReason
 
 const (
-	TerminationDurationElapsed      TerminationReason = "duration_elapsed"
-	TerminationContextCanceled      TerminationReason = "context_canceled"
-	TerminationContextDeadline      TerminationReason = "context_deadline_exceeded"
-	TerminationInvalidConfiguration TerminationReason = "invalid_configuration"
-	TerminationInvalidTarget        TerminationReason = "invalid_target"
-	TerminationInternalError        TerminationReason = "internal_error"
+	TerminationDurationElapsed      = contract.TerminationDurationElapsed
+	TerminationContextCanceled      = contract.TerminationContextCanceled
+	TerminationContextDeadline      = contract.TerminationContextDeadline
+	TerminationInvalidConfiguration = contract.TerminationInvalidConfiguration
+	TerminationInvalidTarget        = contract.TerminationInvalidTarget
+	TerminationInternalError        = contract.TerminationInternalError
 )
 
 // RequestResult represents the result of one request attempt.
@@ -64,21 +67,11 @@ type RunResult struct {
 	TerminationReason TerminationReason
 }
 
-// SLO defines the service-level objectives that a load test must satisfy
-// before its Kubernetes metrics may be used to generate a recommendation.
-// MaximumHTTPErrorRate is a ratio in the range [0, 1]. A zero latency limit
-// disables the latency objective, and a zero minimum disables the RPS objective.
-type SLO struct {
-	MinimumRPS           float64
-	MaximumHTTPErrorRate float64
-	MaximumP95Latency    time.Duration
-}
+// SLO is the shared numeric gate. T10 removes this alias with the generator.
+type SLO = contract.SLO
 
-// SLOAssessment is the typed outcome of evaluating a run against an SLO.
-type SLOAssessment struct {
-	Passed     bool
-	Violations []string
-}
+// SLOAssessment is the shared numeric gate result.
+type SLOAssessment = contract.SLOAssessment
 
 // NewTester creates a new load tester.
 func NewTester(target string, rps, concurrency int) *Tester {
@@ -131,40 +124,8 @@ func (r *panicReporter) err() error {
 // result. Individual HTTP failures are captured in RunResult and do not become
 // a Go error; setup failures and caller cancellation do.
 func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, error) {
-	result := RunResult{
-		StatusCodes:       make(map[int]int),
-		TerminationReason: TerminationInvalidConfiguration,
-	}
-
-	if ctx == nil {
-		return result, errors.New("load-test context must not be nil")
-	}
-	if err := ctx.Err(); err != nil {
-		result.TerminationReason = terminationReason(ctx)
-		return result, err
-	}
-	if duration <= 0 {
-		return result, errors.New("load-test duration must be greater than zero")
-	}
-	if t.client == nil {
-		return result, errors.New("load-test HTTP client must not be nil")
-	}
-	if t.concurrency <= 0 && t.rps <= 0 {
-		return result, errors.New("load-test RPS must be greater than zero when concurrency is disabled")
-	}
-	if t.concurrency > 0 && t.rps > 0 {
-		return result, errors.New("load-test RPS and concurrency modes are mutually exclusive")
-	}
-	if t.rps < 0 {
-		return result, errors.New("load-test RPS must not be negative")
-	}
-	if t.concurrency < 0 {
-		return result, errors.New("load-test concurrency must not be negative")
-	}
-
-	targetURL, err := t.validateTarget()
+	result, targetURL, err := t.preflight(ctx, duration)
 	if err != nil {
-		result.TerminationReason = TerminationInvalidTarget
 		return result, err
 	}
 
@@ -221,6 +182,55 @@ func (t *Tester) Run(ctx context.Context, duration time.Duration) (RunResult, er
 		return result, ctx.Err()
 	}
 	return result, nil
+}
+
+// Preflight checks the generator configuration without starting requests.
+// A nil error means the configuration can start. T10 removes this with the generator.
+func (t *Tester) Preflight(ctx context.Context, duration time.Duration) (TerminationReason, error) {
+	result, _, err := t.preflight(ctx, duration)
+	if err != nil {
+		return result.TerminationReason, err
+	}
+	return "", nil
+}
+
+func (t *Tester) preflight(ctx context.Context, duration time.Duration) (RunResult, *url.URL, error) {
+	result := RunResult{
+		StatusCodes:       make(map[int]int),
+		TerminationReason: TerminationInvalidConfiguration,
+	}
+	if ctx == nil {
+		return result, nil, errors.New("load-test context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		result.TerminationReason = terminationReason(ctx)
+		return result, nil, err
+	}
+	if duration <= 0 {
+		return result, nil, errors.New("load-test duration must be greater than zero")
+	}
+	if t.client == nil {
+		return result, nil, errors.New("load-test HTTP client must not be nil")
+	}
+	if t.concurrency <= 0 && t.rps <= 0 {
+		return result, nil, errors.New("load-test RPS must be greater than zero when concurrency is disabled")
+	}
+	if t.concurrency > 0 && t.rps > 0 {
+		return result, nil, errors.New("load-test RPS and concurrency modes are mutually exclusive")
+	}
+	if t.rps < 0 {
+		return result, nil, errors.New("load-test RPS must not be negative")
+	}
+	if t.concurrency < 0 {
+		return result, nil, errors.New("load-test concurrency must not be negative")
+	}
+
+	targetURL, err := t.validateTarget()
+	if err != nil {
+		result.TerminationReason = TerminationInvalidTarget
+		return result, nil, err
+	}
+	return result, targetURL, nil
 }
 
 // runRPSTest schedules requests at the configured rate until runCtx is done.
@@ -365,14 +375,7 @@ func logRequestError(err error) {
 }
 
 func terminationReason(ctx context.Context) TerminationReason {
-	switch {
-	case errors.Is(ctx.Err(), context.Canceled):
-		return TerminationContextCanceled
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return TerminationContextDeadline
-	default:
-		return TerminationDurationElapsed
-	}
+	return contract.TerminationFromContext(ctx)
 }
 
 // validateTarget ensures the target is a usable HTTP URL and normalizes it.
@@ -535,59 +538,36 @@ func (m *Metrics) RunResult(reason TerminationReason) RunResult {
 	}
 }
 
-// EvaluateSLO checks whether the run is safe to use for a recommendation.
+// EvaluateSLO delegates to the shared provider gate.
+// T10 removes this wrapper with the generator. Zero completed requests do not
+// become a measured RPS of zero; that gate lives in the provider contract.
 func (r RunResult) EvaluateSLO(slo SLO) (SLOAssessment, error) {
-	if math.IsNaN(slo.MinimumRPS) || math.IsInf(slo.MinimumRPS, 0) || slo.MinimumRPS < 0 {
-		return SLOAssessment{}, errors.New("minimum RPS SLO must be a finite non-negative number")
-	}
-	if math.IsNaN(slo.MaximumHTTPErrorRate) ||
-		math.IsInf(slo.MaximumHTTPErrorRate, 0) ||
-		slo.MaximumHTTPErrorRate < 0 ||
-		slo.MaximumHTTPErrorRate > 1 {
-		return SLOAssessment{}, errors.New("maximum HTTP error rate SLO must be between 0 and 1")
-	}
-	if slo.MaximumP95Latency < 0 {
-		return SLOAssessment{}, errors.New("maximum p95 latency SLO must not be negative")
-	}
+	return contract.EvaluateSLO(legacyOutcome(r), &slo)
+}
 
-	assessment := SLOAssessment{Passed: true}
-	if r.TerminationReason != TerminationDurationElapsed {
-		assessment.Violations = append(
-			assessment.Violations,
-			fmt.Sprintf("termination reason is %s", r.TerminationReason),
-		)
+func legacyOutcome(result RunResult) contract.Outcome {
+	outcome := contract.Outcome{
+		Termination: result.TerminationReason,
+		Latency: contract.LatencyReport{
+			Semantics: contract.LatencyUntilResponseHeaders,
+		},
 	}
-	if r.Requests == 0 {
-		assessment.Violations = append(assessment.Violations, "no requests completed")
+	outcome.HTTPRequests = contract.KnownCount(result.Requests)
+	outcome.HTTPErrors = contract.KnownCount(result.HTTPErrors)
+	if result.Requests == 0 {
+		outcome.HTTPErrorRate = contract.MissingRatio()
+		outcome.ActualThroughput = contract.MissingRate()
+		outcome.Latency.P50 = contract.MissingDuration()
+		outcome.Latency.P95 = contract.MissingDuration()
+		outcome.Latency.P99 = contract.MissingDuration()
+		return outcome
 	}
-	if slo.MinimumRPS > 0 && r.ActualRPS < slo.MinimumRPS {
-		assessment.Violations = append(
-			assessment.Violations,
-			fmt.Sprintf("actual RPS %.2f is below minimum %.2f", r.ActualRPS, slo.MinimumRPS),
-		)
-	}
-	if r.HTTPErrorRate > slo.MaximumHTTPErrorRate {
-		assessment.Violations = append(
-			assessment.Violations,
-			fmt.Sprintf(
-				"HTTP error rate %.2f%% exceeds maximum %.2f%%",
-				r.HTTPErrorRate*100,
-				slo.MaximumHTTPErrorRate*100,
-			),
-		)
-	}
-	if slo.MaximumP95Latency > 0 && r.P95Latency > slo.MaximumP95Latency {
-		assessment.Violations = append(
-			assessment.Violations,
-			fmt.Sprintf(
-				"p95 latency %s exceeds maximum %s",
-				r.P95Latency,
-				slo.MaximumP95Latency,
-			),
-		)
-	}
-	assessment.Passed = len(assessment.Violations) == 0
-	return assessment, nil
+	outcome.HTTPErrorRate = contract.KnownRatio(result.HTTPErrorRate)
+	outcome.ActualThroughput = contract.KnownRate(result.ActualRPS)
+	outcome.Latency.P50 = contract.KnownDuration(result.P50Latency)
+	outcome.Latency.P95 = contract.KnownDuration(result.P95Latency)
+	outcome.Latency.P99 = contract.KnownDuration(result.P99Latency)
+	return outcome
 }
 
 // PrintSummary prints the typed load-test result to stderr so structured CLI

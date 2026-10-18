@@ -2,7 +2,7 @@
 
 Every JSON document here is synthetic. `dataClass` is `synthetic_fixture`. Nothing in this tree was collected from a cluster, and the numbers are examples of the v1 shape rather than production evidence.
 
-`manifestSha256` and artifact `sha256` values are lowercase hex claims so the schema's hash pattern can be checked. They are not digests of the files beside them. Byte verification belongs to T08. `testdata/contracts/v1/semantic-checks.json` records the cross-file checks that are not executed; its `executedBy` value is `none`.
+`manifestSha256` and artifact `sha256` values are lowercase hex claims so the schema's hash pattern can be checked. They are not digests of the files beside them. Byte verification belongs to T08. `testdata/contracts/v1/semantic-checks.json` records checks the schema does not execute. `executedBy` is `none` except where a named Go test runs that statement.
 
 The expected result of each document is `catalog.json`. From the repository root:
 
@@ -46,6 +46,8 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/rejected-invalid/analysis.json` | Candidate `rejected` with evidence `invalid` and reason `identity_changed`. |
 | `valid/limit-transition/analysis.json` | CPU limit moves from `set` to `absent`. Memory limit moves from `absent` to `set`. |
 | `valid/load-cancelled-partial/observations.json` | The load started (`executed` true) and then ended with `context_canceled`. Requests, error rate, and known latency remain. |
+| `valid/example-engine/run-spec.json` | Adapter id `example-engine`, not only `builtin-get` or `k6-wrapper`. Warmup and cooldown are requested, so `warmup_cooldown_phases` is required. |
+| `valid/provider-outcome/observations.json` | Actual warmup, measured, and cooldown bounds. Checks are `missing_signal`. Dropped work and saturation are null. `contractVersion` is `1`. |
 | `valid/identity-changed/` | Image digest changed inside the run. `identityStable` is false. Evidence `invalid` with `identity_changed`. |
 | `valid/observe/` | No load URL and no SLO. A recommendation is allowed only with limitation `observe_without_slo`. Candidate stays `not_tested`. |
 | `valid/autoscaler-unknown/` | HPA discovery `denied` is `unknown`, not absent. A recommendation may exist. Candidate validation is blocked. |
@@ -76,6 +78,12 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/cpu-quantity-string.json` | analysis | `cpuRequestMilli` must be an integer, not `198m` |
 | `invalid/negative-memory.json` | analysis | memory request below the floor |
 | `invalid/error-rate-as-percent.json` | run spec | error rate 50 is above the ratio maximum of 1 |
+| `invalid/adapter-id-pattern.json` | run spec | `wrapper.name` must match the component id pattern |
+| `invalid/latency-full-response.json` | run spec | `full_response` is not a latency semantics value |
+| `invalid/capability-shell-hook.json` | run spec | `shell_hook` is not a capability |
+| `invalid/checks-missing-with-passed.json` | observations | `missing_signal` checks cannot also carry `passed` |
+| `invalid/two-measured-phases.json` | observations | two measured phases are not a legal actual order |
+| `invalid/unknown-latency-known-p95.json` | observations | unknown latency semantics requires `missing_signal` percentiles |
 | `invalid/zero-encodes-missing-signal.json` | runtime findings | `missing_signal` cannot also carry `nanoseconds` |
 | `invalid/missing-signal-means-absent.json` | runtime findings | conclusion cannot be `problem_absent` |
 | `invalid/slo-failed-with-recommendation.json` | analysis | failed SLO cannot carry a recommendation object |

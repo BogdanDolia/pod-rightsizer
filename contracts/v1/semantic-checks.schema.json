@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Catalog of invariants that JSON Schema does not execute. executedBy is fixed to none so this file cannot claim those checks ran.",
+  "$comment": "Catalog of invariants that JSON Schema does not execute. executedBy is none unless a named Go test actually runs that statement. Naming a test is not proof of a different statement.",
   "title": "SemanticCheckCatalog",
   "type": "object",
   "additionalProperties": false,
@@ -21,7 +21,11 @@
             "type": "string",
             "pattern": "^T(0[3-9]|1[0-6])$"
           },
-          "executedBy": { "const": "none" },
+          "executedBy": {
+            "description": "none means the check is not wired. go-test names the test that executes this statement.",
+            "type": "string",
+            "pattern": "^(none|go-test:[A-Za-z0-9_./]+)$"
+          },
           "statement": { "type": "string", "minLength": 1 },
           "example": { "type": "string", "minLength": 1 }
         }

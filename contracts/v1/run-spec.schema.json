@@ -146,18 +146,28 @@
       "required": ["id", "wrapper", "latencySemantics", "method", "phases", "authFixture", "dataFixture"],
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "contentHash": { "$ref": "defs.schema.json#/$defs/sha256" },
         "wrapper": {
+          "description": "Adapter identity. name is an open component id, not a closed enum of builtin-get and k6-wrapper. Registration is checked by the load provider, not by this schema alone.",
           "type": "object",
           "additionalProperties": false,
           "required": ["name", "version"],
           "properties": {
-            "name": { "enum": ["builtin-get", "k6-wrapper", "none"] },
+            "name": { "$ref": "defs.schema.json#/$defs/componentId" },
             "version": { "type": "string", "minLength": 1, "maxLength": 64 }
           }
         },
+        "engine": { "$ref": "defs.schema.json#/$defs/componentIdentity" },
+        "capabilities": {
+          "description": "Capabilities this run requires. Omitting the array does not add requirements. shell_hook is not a capability.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "defs.schema.json#/$defs/capability" }
+        },
         "latencySemantics": {
-          "description": "until_response_headers is the legacy tester: time.Since until http.Client.Do returns, before the body is fully read. k6 must declare its own semantics. Comparisons require equal semantics.",
-          "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
+          "description": "until_response_headers is the legacy tester: time.Since until http.Client.Do returns, before the body is fully read. It is not k6_http_req_duration. Comparisons require equal semantics.",
+          "$ref": "defs.schema.json#/$defs/requestedLatencySemantics"
         },
         "method": { "enum": ["GET", "NONE"] },
         "phases": {
@@ -194,7 +204,39 @@
             "properties": {
               "latencySemantics": { "const": "until_response_headers" },
               "method": { "const": "GET" },
-              "wrapper": { "properties": { "version": { "const": "legacy-1" } } }
+              "wrapper": {
+                "properties": {
+                  "name": { "const": "builtin-get" },
+                  "version": { "const": "legacy-1" }
+                }
+              },
+              "engine": {
+                "properties": {
+                  "id": { "const": "builtin-get" },
+                  "version": { "const": "legacy-1" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["phases", "capabilities"],
+            "properties": {
+              "capabilities": { "type": "array" },
+              "phases": {
+                "contains": {
+                  "properties": { "name": { "enum": ["warmup", "cooldown"] } },
+                  "required": ["name"]
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "capabilities": {
+                "contains": { "const": "warmup_cooldown_phases" }
+              }
             }
           }
         }

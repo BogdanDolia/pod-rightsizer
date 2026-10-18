@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
 )
 
 func TestIndependentSamplesDeduplicatesSourceSnapshots(t *testing.T) {
@@ -133,6 +135,110 @@ func TestFullyContainedSamplesFiltersBoundariesBeforeOverlaps(t *testing.T) {
 			"FullyContainedSamples()[0].CPUUsage = %v, want fully-contained sample",
 			contained[0].CPUUsage,
 		)
+	}
+}
+
+func TestClassifyWindowsKeepsRawValuesAndFoldsHighWater(t *testing.T) {
+	timestamp := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.UTC)
+	first := ResourceMetrics{
+		ContainerName: "worker",
+		Timestamp:     timestamp,
+		Window:        30 * time.Second,
+		CPUUsage:      0.1,
+		MemoryUsage:   100,
+		CPUSourcePod:  "pod-a",
+	}
+	second := first
+	second.Timestamp = timestamp.Add(30 * time.Second)
+	second.CPUUsage = 0.2
+	second.CPUSourcePod = "pod-b"
+	overlapping := first
+	overlapping.Timestamp = timestamp.Add(15 * time.Second)
+	overlapping.CPUUsage = 0.15
+	overlapping.CPUSourcePod = "pod-c"
+	repeated := first
+	repeated.PolledAt = timestamp.Add(time.Second)
+
+	evidence, err := ClassifyIndependent([]ResourceMetrics{second, overlapping, first, repeated})
+	if err != nil {
+		t.Fatalf("ClassifyIndependent() error = %v", err)
+	}
+	if evidence.IndependentCount != 2 || evidence.DiscardedCount != 2 || len(evidence.Accepted) != 2 {
+		t.Fatalf("evidence counts = %+v, want 2 independent and 2 discarded", evidence)
+	}
+	if evidence.Raw[2].Sample.CPUUsage != 0.1 || evidence.Raw[2].Disposition != DispositionAccepted {
+		t.Fatalf("raw first sample = %#v, want the original 0.1 cores", evidence.Raw[2])
+	}
+	if evidence.Raw[3].Reason != DiscardDuplicatePoll {
+		t.Fatalf("repeat reason = %q, want %s", evidence.Raw[3].Reason, DiscardDuplicatePoll)
+	}
+	if evidence.Accepted[0].CPUUsage != 0.15 || evidence.Accepted[0].CPUSourcePod != "pod-c" {
+		t.Fatalf("folded window = %#v, want overlapping high-water from pod-c", evidence.Accepted[0])
+	}
+	if evidence.Raw[1].Reason != DiscardOverlappingWindow || evidence.Raw[1].Sample.CPUUsage != 0.15 {
+		t.Fatalf("raw overlap = %#v, want the original overlapping sample", evidence.Raw[1])
+	}
+}
+
+func TestClassifyWindowsFiltersBoundariesBeforeFold(t *testing.T) {
+	loadStart := time.Date(2026, time.August, 11, 12, 0, 0, 0, time.UTC)
+	outside := ResourceMetrics{
+		ContainerName: "worker",
+		Timestamp:     loadStart.Add(30 * time.Second),
+		Window:        time.Minute,
+		CPUUsage:      0.9,
+		MemoryUsage:   900,
+		Coverage:      kubernetes.Coverage{Assessed: true, Expected: 1, Observed: 0, Complete: false, Missing: []string{"pod-b"}},
+	}
+	inside := ResourceMetrics{
+		ContainerName: "worker",
+		Timestamp:     loadStart.Add(time.Minute),
+		Window:        30 * time.Second,
+		CPUUsage:      0.2,
+		MemoryUsage:   200,
+	}
+	evidence, err := ClassifyWindows(
+		[]ResourceMetrics{outside, inside},
+		loadStart,
+		loadStart.Add(2*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("ClassifyWindows() error = %v", err)
+	}
+	if evidence.Raw[0].Reason != DiscardOutsideMeasured {
+		t.Fatalf("outside reason = %q, want %s", evidence.Raw[0].Reason, DiscardOutsideMeasured)
+	}
+	if len(evidence.Accepted) != 1 || evidence.Accepted[0].CPUUsage != 0.2 {
+		t.Fatalf("accepted = %#v, want the contained window without the outside high-water", evidence.Accepted)
+	}
+}
+
+func TestClassifyWindowsMarksIncompleteCoverageAfterBoundaryFilter(t *testing.T) {
+	loadStart := time.Date(2026, time.August, 11, 12, 0, 0, 0, time.UTC)
+	incomplete := kubernetes.Coverage{Assessed: true, Expected: 2, Observed: 1, Complete: false, Missing: []string{"pod-b"}}
+	inside := ResourceMetrics{
+		ContainerName: "worker",
+		Timestamp:     loadStart.Add(20 * time.Second),
+		Window:        10 * time.Second,
+		CPUUsage:      0.2,
+		MemoryUsage:   200,
+		Coverage:      incomplete,
+	}
+	outside := inside
+	outside.Timestamp = loadStart.Add(-time.Second)
+	evidence, err := ClassifyWindows(
+		[]ResourceMetrics{outside, inside},
+		loadStart,
+		loadStart.Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("ClassifyWindows() error = %v", err)
+	}
+	if evidence.Raw[0].Reason != DiscardOutsideMeasured || evidence.Raw[1].Reason != DiscardMissingPod {
+		t.Fatalf("reasons = %q, %q", evidence.Raw[0].Reason, evidence.Raw[1].Reason)
+	}
+	if evidence.IndependentCount != 0 || len(evidence.Accepted) != 0 {
+		t.Fatalf("accepted = %#v, want incomplete coverage excluded", evidence.Accepted)
 	}
 }
 

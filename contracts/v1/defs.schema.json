@@ -600,6 +600,89 @@
     },
     "hashMeaning": {
       "const": "content_immutability_not_measurement_truth"
+    },
+    "componentId": {
+      "description": "Adapter or engine id. The contract does not close this list at builtin-get and k6-wrapper. A matching pattern is not proof that an adapter is registered.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "componentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/componentId" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "capability": {
+      "description": "A signal an adapter claims it can produce. Required capabilities come from the request. An adapter that cannot separate warmup and cooldown must not claim warmup_cooldown_phases.",
+      "enum": [
+        "http_requests",
+        "http_errors",
+        "actual_http_throughput",
+        "latency_until_response_headers",
+        "measured_phase_boundaries",
+        "warmup_cooldown_phases",
+        "cancellation",
+        "application_checks",
+        "useful_throughput",
+        "dropped_work",
+        "generator_saturation"
+      ]
+    },
+    "requestedLatencySemantics": {
+      "description": "Semantics the run asks the adapter to measure. unknown is not a request. until_response_headers is the time until response headers, not full-body latency and not k6_http_req_duration.",
+      "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
+    },
+    "latencySemantics": {
+      "description": "Semantics of a reported latency. unknown means the semantics were not established. It is not until_response_headers and not a zero duration. Unknown keeps every percentile missing_signal, including when requests are positive.",
+      "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable", "unknown"]
+    },
+    "actualPhase": {
+      "description": "Actual phase bounds on the collector clock. A planned duration does not prove these timestamps. A failed or cancelled run may record only the prefix that started.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "startedAt", "finishedAt", "clock"],
+      "properties": {
+        "name": { "enum": ["warmup", "measured", "cooldown"] },
+        "startedAt": { "$ref": "#/$defs/dateTime" },
+        "finishedAt": { "$ref": "#/$defs/dateTime" },
+        "clock": { "const": "collector_local" }
+      }
+    },
+    "loadChecks": {
+      "description": "Application checks. missing_signal means checks were not run. unknown means the result could not be classified. Neither value means the checks passed.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": {
+            "state": { "enum": ["missing_signal", "unknown"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "passed", "defined", "failed"],
+          "properties": {
+            "state": { "const": "known" },
+            "passed": { "type": "boolean" },
+            "defined": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "unknownSignal": {
+      "description": "Explicit unknown. Null remains not reported. A number or boolean remains a measured value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": { "state": { "const": "unknown" } }
     }
   }
 }

@@ -172,21 +172,45 @@
           "additionalProperties": false,
           "required": ["semantics", "p50Ns", "p95Ns", "p99Ns"],
           "properties": {
-            "semantics": {
-              "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable"]
-            },
+            "semantics": { "$ref": "defs.schema.json#/$defs/latencySemantics" },
             "p50Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" },
             "p95Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" },
             "p99Ns": { "$ref": "defs.schema.json#/$defs/durationSignal" }
           }
         },
-        "usefulThroughputRps": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "usefulThroughputRps": {
+          "description": "Null means not reported. A number is a measurement, including zero. unknown is a separate state.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "number", "minimum": 0 },
+            { "$ref": "defs.schema.json#/$defs/unknownSignal" }
+          ]
+        },
         "droppedIterations": {
-          "description": "Null until a wrapper reports it. Zero would claim no iterations were dropped.",
-          "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }]
+          "description": "Null means the adapter did not report dropped work. Zero would claim no work was dropped. unknown is not zero.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0 },
+            { "$ref": "defs.schema.json#/$defs/unknownSignal" }
+          ]
         },
         "generatorSaturated": {
-          "oneOf": [{ "type": "null" }, { "type": "boolean" }]
+          "description": "Null means saturation was not reported. false is a measured false. unknown is not false.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "boolean" },
+            { "$ref": "defs.schema.json#/$defs/unknownSignal" }
+          ]
+        },
+        "checks": { "$ref": "defs.schema.json#/$defs/loadChecks" },
+        "contractVersion": { "const": "1" },
+        "adapter": { "$ref": "defs.schema.json#/$defs/componentIdentity" },
+        "engine": { "$ref": "defs.schema.json#/$defs/componentIdentity" },
+        "phases": {
+          "description": "Actual phase bounds. Warmup and cooldown are outside measured statistics. When this array is present on duration_elapsed, it is one completed order with exactly one measured phase: measured; warmup then measured; measured then cooldown; or warmup, measured, then cooldown. A failed or cancelled run may instead record the prefix that actually started, including warmup alone, and must not invent a measured phase. Omitting the field leaves older documents valid. An empty array is allowed only when the load did not start.",
+          "type": "array",
+          "maxItems": 3,
+          "items": { "$ref": "defs.schema.json#/$defs/actualPhase" }
         },
         "interval": {
           "description": "Collector-local start and finish. This is not a Metrics API source window.",
@@ -227,6 +251,7 @@
           }
         },
         {
+          "description": "Positive requests keep the observed rates. Known latency semantics still require known percentiles. Unknown semantics is exempt here because that branch requires missing_signal percentiles instead of invented numbers.",
           "if": {
             "properties": { "requests": { "exclusiveMinimum": 0 } },
             "required": ["requests"]
@@ -234,15 +259,34 @@
           "then": {
             "properties": {
               "actualRps": { "type": "number" },
-              "httpErrorRate": { "type": "number" },
-              "latency": {
-                "properties": {
-                  "p50Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] },
-                  "p95Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] },
-                  "p99Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] }
+              "httpErrorRate": { "type": "number" }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "not": {
+                    "properties": {
+                      "latency": {
+                        "properties": { "semantics": { "const": "unknown" } },
+                        "required": ["semantics"]
+                      }
+                    },
+                    "required": ["latency"]
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "latency": {
+                      "properties": {
+                        "p50Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] },
+                        "p95Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] },
+                        "p99Ns": { "properties": { "state": { "const": "known" } }, "required": ["state", "nanoseconds"] }
+                      }
+                    }
+                  }
                 }
               }
-            }
+            ]
           }
         },
         {
@@ -255,6 +299,132 @@
               "termination": { "enum": ["not_started", "context_canceled", "invalid_configuration", "invalid_target"] },
               "requests": { "const": 0 },
               "httpErrors": { "const": 0 },
+              "interval": { "type": "null" },
+              "phases": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "description": "Unknown semantics does not publish known percentiles, including when requests are positive. The gap stays missing_signal rather than zero or a known semantics value.",
+          "if": {
+            "properties": {
+              "latency": {
+                "properties": { "semantics": { "const": "unknown" } },
+                "required": ["semantics"]
+              }
+            },
+            "required": ["latency"]
+          },
+          "then": {
+            "properties": {
+              "latency": {
+                "properties": {
+                  "p50Ns": { "properties": { "state": { "const": "missing_signal" } } },
+                  "p95Ns": { "properties": { "state": { "const": "missing_signal" } } },
+                  "p99Ns": { "properties": { "state": { "const": "missing_signal" } } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "phases": { "minItems": 1 } },
+            "required": ["phases"]
+          },
+          "then": {
+            "properties": {
+              "phases": {
+                "oneOf": [
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] }
+                    ],
+                    "maxItems": 1,
+                    "minItems": 1
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "warmup" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] }
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "cooldown" } }, "required": ["name"] }
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "warmup" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "measured" } }, "required": ["name"] },
+                      { "properties": { "name": { "const": "cooldown" } }, "required": ["name"] }
+                    ],
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  {
+                    "prefixItems": [
+                      { "properties": { "name": { "const": "warmup" } }, "required": ["name"] }
+                    ],
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "description": "duration_elapsed with actual phases still needs the one measured phase. A warmup-only prefix is not a successful measurement.",
+          "if": {
+            "properties": {
+              "termination": { "const": "duration_elapsed" },
+              "phases": { "minItems": 1 }
+            },
+            "required": ["termination", "phases"]
+          },
+          "then": {
+            "properties": {
+              "phases": {
+                "contains": {
+                  "properties": { "name": { "const": "measured" } },
+                  "required": ["name"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "description": "Warmup alone is the prefix of a failed or cancelled run whose measured phase did not start. The interval stays null.",
+          "if": {
+            "properties": {
+              "phases": {
+                "minItems": 1,
+                "maxItems": 1,
+                "prefixItems": [
+                  { "properties": { "name": { "const": "warmup" } }, "required": ["name"] }
+                ]
+              }
+            },
+            "required": ["phases"]
+          },
+          "then": {
+            "properties": {
+              "termination": {
+                "enum": [
+                  "context_canceled",
+                  "context_deadline_exceeded",
+                  "invalid_configuration",
+                  "invalid_target",
+                  "internal_error"
+                ]
+              },
               "interval": { "type": "null" }
             }
           }

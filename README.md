@@ -30,6 +30,8 @@ bash scripts/check-contracts.sh
 
 The decision record is [docs/adr/0001-analysis-contract.md](docs/adr/0001-analysis-contract.md).
 
+The load-provider contract in `pkg/providers/loadtest` is engine-independent. A caller receives measured-phase edges through a synchronous callback while `Run` is still in progress. A usable measurement has one completed measured phase; known counts, rates, ratios, and durations stay inside the contract range; unknown latency semantics stays unknown and does not publish percentile numbers. Cancellation during warmup keeps that phase. The temporary in-process GET adapter is `builtin-get` / `legacy-1`. It reports latency until response headers and does not claim warmup, cooldown, application checks, dropped work, or generator saturation. The CLI still calls the legacy tester until T04. T10 adds the external k6 adapter and removes the old generator.
+
 The Node.js reference fixture used by later measurement work lives in `test/fixtures/node-http`. It is not part of the release archives. From the repository root:
 
 ```bash

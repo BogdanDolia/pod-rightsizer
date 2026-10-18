@@ -5,9 +5,30 @@
     {
       "id": "independent-window-fold",
       "owner": "T03",
-      "executedBy": "none",
+      "executedBy": "go-test:pkg/metrics.TestClassifyWindowsKeepsRawValuesAndFoldsHighWater",
       "statement": "Discarded overlapping and duplicate windows must not increase independentWindowCount, and an overlapping window's CPU or memory maximum is folded into the previous accepted window.",
       "example": "valid/report-only/observations.json"
+    },
+    {
+      "id": "load-provider-conformance",
+      "owner": "T03",
+      "executedBy": "go-test:pkg/providers/loadtest.TestConformance",
+      "statement": "A registered adapter id other than the legacy generator can run. An unknown adapter id, a missing required capability, a claimed capability without its signal, unknown or incompatible latency semantics, a bad phase order, refusal before start, a technical error after start, cancellation before start, during warmup, and during the measured phase, a partial outcome, failed application checks, SLO failure, zero requests, and generator saturation are rejected or reported without turning a missing signal into zero or false. A usable duration_elapsed result requires one completed measured phase even when OnPhase is nil and measured_phase_boundaries is not required. A missing, unfinished, repeated, or contradictory measured phase is not usable. Numeric SLO can still pass valid numbers without that phase. Cancellation or an internal error during warmup keeps the warmup phase and stays unsuitable. Known counts and durations below zero, non-finite or negative rates, ratios outside 0 to 1, and HTTP errors above HTTP requests are unsuitable and do not pass EvaluateSLO, including when the matching numeric gate is disabled. That fact check does not need phase metadata. Unknown latency semantics with positive requests stays unknown, keeps missing percentiles, and does not pass an active p95 gate. Valid zero latency, a zero error ratio, and a measured zero remain allowed.",
+      "example": "valid/example-engine/run-spec.json"
+    },
+    {
+      "id": "metrics-source-provenance",
+      "owner": "T03",
+      "executedBy": "go-test:pkg/providers/metrics/k8s.TestCollectKeepsSourceProvenance",
+      "statement": "A metrics sample keeps the source timestamp, source window, local poll time, selected container, observed workload and pod identifiers, and coverage. The source time is not replaced by the poll time.",
+      "example": "valid/provider-outcome/observations.json"
+    },
+    {
+      "id": "metrics-partial-collection",
+      "owner": "T03",
+      "executedBy": "go-test:pkg/providers/metrics/k8s.TestCollectReturnsPartialSamplesAfterALaterError",
+      "statement": "A later metrics error or cancellation returns samples already read together with the error and does not present them as a complete successful collection. A first poll that produced no facts returns no samples.",
+      "example": "valid/load-cancelled-partial/observations.json"
     },
     {
       "id": "slo-recompute",

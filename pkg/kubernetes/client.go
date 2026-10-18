@@ -28,20 +28,64 @@ type ResourceSettings struct {
 
 // ContainerMetrics is one conservative source snapshot for a container. CPU
 // and memory are the per-resource maxima across the replicas selected by a
-// Deployment. Timestamp and Window envelope every replica's Metrics API source
-// interval rather than using the local polling clock.
+// Deployment. Those maxima may come from different pods. Timestamp and Window
+// envelope every replica's Metrics API source interval. PolledAt is the local
+// poll clock and is not a source timestamp.
 type ContainerMetrics struct {
-	ContainerName string
-	Timestamp     time.Time
-	Window        time.Duration
-	CPUUsage      float64
-	MemoryUsage   float64
+	ContainerName   string
+	Timestamp       time.Time
+	Window          time.Duration
+	CPUUsage        float64
+	MemoryUsage     float64
+	PolledAt        time.Time
+	Pods            []PodResourceUsage
+	Coverage        Coverage
+	Workload        WorkloadObservation
+	CPUSourcePod    string
+	MemorySourcePod string
+}
+
+// PodResourceUsage is one replica's Metrics API reading for the selected container.
+// UID is empty when the API object did not carry one.
+type PodResourceUsage struct {
+	Name            string
+	UID             string
+	SourceTimestamp time.Time
+	SourceWindow    time.Duration
+	CPUCores        float64
+	MemoryMi        float64
+}
+
+// Coverage is the pod census for one poll. Complete is true only when the
+// census was assessed and every expected pod returned metrics. A zero Coverage
+// means the census was not assessed. Missing UIDs stay empty.
+type Coverage struct {
+	Assessed bool
+	Expected int
+	Observed int
+	Missing  []string
+	Complete bool
+}
+
+// WorkloadObservation records identifiers that were actually read. Empty UID
+// fields are absent facts, not verified matches.
+type WorkloadObservation struct {
+	Namespace             string
+	DeploymentName        string
+	DeploymentUID         string
+	DeploymentUIDObserved bool
+	Generation            int64
+	GenerationObserved    bool
+	ContainerName         string
+	PodSelector           string
 }
 
 // Workload identifies a Deployment, its pods, and the container to right-size.
 // PodSelector is resolved from the Deployment rather than inferred from its name.
+// DeploymentUID is set only when the object that was read has a UID.
 type Workload struct {
 	DeploymentName       string
+	DeploymentUID        string
 	DeploymentGeneration int64
 	ContainerName        string
 	PodSelector          string
@@ -145,6 +189,9 @@ func (c *Client) ResolveWorkload(
 		DeploymentGeneration: deployment.Generation,
 		ContainerName:        containerName,
 		PodSelector:          selector.String(),
+	}
+	if deployment.UID != "" {
+		workload.DeploymentUID = string(deployment.UID)
 	}
 
 	pods, err := c.listWorkloadPods(ctx, namespace, workload)
@@ -265,6 +312,7 @@ func (c *Client) GetPodMetrics(
 		}
 	}
 
+	polledAt := time.Now().UTC()
 	podMetrics, err := c.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: workload.PodSelector,
 	})
@@ -282,62 +330,90 @@ func (c *Client) GetPodMetrics(
 
 	var maximumCPU float64
 	var maximumMemory float64
+	var cpuSourcePod string
+	var memorySourcePod string
 	var earliestSourceStart time.Time
 	var latestSourceEnd time.Time
+	usages := make([]PodResourceUsage, 0, len(podMetrics.Items))
 	seenPods := make(map[string]struct{}, len(podMetrics.Items))
+	partial := func(cause error) (ContainerMetrics, error) {
+		snapshot := assembleContainerMetrics(
+			namespace,
+			workload,
+			resolvedDeployment,
+			polledAt,
+			usages,
+			expectedPods,
+			seenPods,
+			maximumCPU,
+			maximumMemory,
+			cpuSourcePod,
+			memorySourcePod,
+			earliestSourceStart,
+			latestSourceEnd,
+			nil,
+			false,
+		)
+		if !containerMetricsHasFacts(snapshot) {
+			return ContainerMetrics{}, cause
+		}
+		return snapshot, cause
+	}
 
 	for _, pod := range podMetrics.Items {
 		if _, ok := expectedPods[pod.Name]; !ok {
-			return ContainerMetrics{}, fmt.Errorf(
+			return partial(fmt.Errorf(
 				"metrics returned unexpected pod %q for deployment %q",
 				pod.Name,
 				workload.DeploymentName,
-			)
+			))
 		}
 		if _, duplicate := seenPods[pod.Name]; duplicate {
-			return ContainerMetrics{}, fmt.Errorf("metrics returned pod %q more than once", pod.Name)
+			return partial(fmt.Errorf("metrics returned pod %q more than once", pod.Name))
 		}
 		seenPods[pod.Name] = struct{}{}
 		if pod.Timestamp.IsZero() {
-			return ContainerMetrics{}, fmt.Errorf(
+			return partial(fmt.Errorf(
 				"metrics for pod %q have no source timestamp",
 				pod.Name,
-			)
+			))
 		}
 		if pod.Window.Duration <= 0 {
-			return ContainerMetrics{}, fmt.Errorf(
+			return partial(fmt.Errorf(
 				"metrics for pod %q have invalid source window %s",
 				pod.Name,
 				pod.Window.Duration,
-			)
+			))
 		}
 
 		container, ok := findMetricsContainer(pod.Containers, workload.ContainerName)
 		if !ok {
-			return ContainerMetrics{}, fmt.Errorf(
+			return partial(fmt.Errorf(
 				"metrics for container %q not found in pod %q",
 				workload.ContainerName,
 				pod.Name,
-			)
+			))
 		}
 
 		// Requests and limits are applied to each replica, so averaging can hide a
 		// hot pod and produce an unsafe recommendation. Keep the maximum observed
-		// usage for each resource instead.
+		// usage for each resource instead. The two maxima may come from different pods.
 		cpuUsage := container.Usage.Cpu().AsApproximateFloat64()
 		memoryUsage := float64(container.Usage.Memory().Value()) / (1024 * 1024)
 		if cpuUsage < 0 || memoryUsage < 0 {
-			return ContainerMetrics{}, fmt.Errorf(
+			return partial(fmt.Errorf(
 				"metrics for container %q in pod %q contain negative usage",
 				workload.ContainerName,
 				pod.Name,
-			)
+			))
 		}
-		if cpuUsage > maximumCPU {
+		if len(usages) == 0 || cpuUsage > maximumCPU {
 			maximumCPU = cpuUsage
+			cpuSourcePod = pod.Name
 		}
-		if memoryUsage > maximumMemory {
+		if len(usages) == 0 || memoryUsage > maximumMemory {
 			maximumMemory = memoryUsage
+			memorySourcePod = pod.Name
 		}
 
 		sourceStart := pod.Timestamp.Time.Add(-pod.Window.Duration)
@@ -347,6 +423,14 @@ func (c *Client) GetPodMetrics(
 		if latestSourceEnd.IsZero() || pod.Timestamp.Time.After(latestSourceEnd) {
 			latestSourceEnd = pod.Timestamp.Time
 		}
+		usages = append(usages, PodResourceUsage{
+			Name:            pod.Name,
+			UID:             observedPodUID(expectedPods[pod.Name], string(pod.UID)),
+			SourceTimestamp: pod.Timestamp.Time,
+			SourceWindow:    pod.Window.Duration,
+			CPUCores:        cpuUsage,
+			MemoryMi:        memoryUsage,
+		})
 	}
 
 	missingPods := make([]string, 0)
@@ -355,9 +439,30 @@ func (c *Client) GetPodMetrics(
 			missingPods = append(missingPods, podName)
 		}
 	}
+	sort.Strings(missingPods)
+	var missing []string
 	if len(missingPods) > 0 {
-		sort.Strings(missingPods)
-		return ContainerMetrics{}, fmt.Errorf(
+		missing = missingPods
+	}
+	snapshot := assembleContainerMetrics(
+		namespace,
+		workload,
+		resolvedDeployment,
+		polledAt,
+		usages,
+		expectedPods,
+		seenPods,
+		maximumCPU,
+		maximumMemory,
+		cpuSourcePod,
+		memorySourcePod,
+		earliestSourceStart,
+		latestSourceEnd,
+		missing,
+		len(missingPods) == 0,
+	)
+	if len(missingPods) > 0 {
+		return snapshot, fmt.Errorf(
 			"metrics missing for deployment %q pods %q",
 			workload.DeploymentName,
 			missingPods,
@@ -370,24 +475,22 @@ func (c *Client) GetPodMetrics(
 			metav1.GetOptions{},
 		)
 		if err != nil {
-			return ContainerMetrics{}, fmt.Errorf(
+			snapshot.Coverage.Complete = false
+			return snapshot, fmt.Errorf(
 				"error rechecking deployment %q after metrics collection: %w",
 				workload.DeploymentName,
 				err,
 			)
 		}
 		if err := validateResolvedDeployment(deployment, workload); err != nil {
-			return ContainerMetrics{}, err
+			snapshot.Coverage.Complete = false
+			snapshot.Workload = observeWorkload(namespace, workload, deployment)
+			return snapshot, err
 		}
+		snapshot.Workload = observeWorkload(namespace, workload, deployment)
 	}
 
-	return ContainerMetrics{
-		ContainerName: workload.ContainerName,
-		Timestamp:     latestSourceEnd,
-		Window:        latestSourceEnd.Sub(earliestSourceStart),
-		CPUUsage:      maximumCPU,
-		MemoryUsage:   maximumMemory,
-	}, nil
+	return snapshot, nil
 }
 
 // Note: YAML patch generation functionality has been centralized in the output package
@@ -451,11 +554,96 @@ func desiredDeploymentReplicas(deployment *appsv1.Deployment) int32 {
 	return *deployment.Spec.Replicas
 }
 
+func assembleContainerMetrics(
+	namespace string,
+	workload Workload,
+	deployment *appsv1.Deployment,
+	polledAt time.Time,
+	usages []PodResourceUsage,
+	expected map[string]string,
+	seen map[string]struct{},
+	maximumCPU, maximumMemory float64,
+	cpuSourcePod, memorySourcePod string,
+	earliestSourceStart, latestSourceEnd time.Time,
+	missing []string,
+	complete bool,
+) ContainerMetrics {
+	ordered := append([]PodResourceUsage(nil), usages...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].Name < ordered[j].Name
+	})
+	var timestamp time.Time
+	var window time.Duration
+	if !latestSourceEnd.IsZero() && !earliestSourceStart.IsZero() {
+		timestamp = latestSourceEnd
+		window = latestSourceEnd.Sub(earliestSourceStart)
+	}
+	return ContainerMetrics{
+		ContainerName: workload.ContainerName,
+		Timestamp:     timestamp,
+		Window:        window,
+		CPUUsage:      maximumCPU,
+		MemoryUsage:   maximumMemory,
+		PolledAt:      polledAt,
+		Pods:          ordered,
+		Coverage: Coverage{
+			Assessed: len(expected) > 0,
+			Expected: len(expected),
+			Observed: len(seen),
+			Missing:  missing,
+			Complete: complete && len(missing) == 0,
+		},
+		Workload:        observeWorkload(namespace, workload, deployment),
+		CPUSourcePod:    cpuSourcePod,
+		MemorySourcePod: memorySourcePod,
+	}
+}
+
+func containerMetricsHasFacts(metrics ContainerMetrics) bool {
+	return len(metrics.Pods) > 0 || !metrics.Timestamp.IsZero()
+}
+
+func observedPodUID(listedUID, metricsUID string) string {
+	if listedUID != "" {
+		return listedUID
+	}
+	return metricsUID
+}
+
+func observeWorkload(
+	namespace string,
+	workload Workload,
+	deployment *appsv1.Deployment,
+) WorkloadObservation {
+	observation := WorkloadObservation{
+		Namespace:          namespace,
+		DeploymentName:     workload.DeploymentName,
+		Generation:         workload.DeploymentGeneration,
+		GenerationObserved: workload.DeploymentGeneration > 0,
+		ContainerName:      workload.ContainerName,
+		PodSelector:        workload.PodSelector,
+	}
+	if workload.DeploymentUID != "" {
+		observation.DeploymentUID = workload.DeploymentUID
+		observation.DeploymentUIDObserved = true
+	}
+	if deployment == nil {
+		return observation
+	}
+	observation.Generation = deployment.Generation
+	observation.GenerationObserved = true
+	if deployment.UID != "" {
+		observation.DeploymentUID = string(deployment.UID)
+		observation.DeploymentUIDObserved = true
+	}
+	return observation
+}
+
 func expectedMetricPods(
 	pods []corev1.Pod,
 	workload Workload,
-) (map[string]struct{}, error) {
-	expected := make(map[string]struct{}, len(pods))
+) (map[string]string, error) {
+	expected := make(map[string]string, len(pods))
 	for _, pod := range pods {
 		if pod.DeletionTimestamp != nil {
 			continue
@@ -468,7 +656,7 @@ func expectedMetricPods(
 				workload.DeploymentName,
 			)
 		}
-		expected[pod.Name] = struct{}{}
+		expected[pod.Name] = string(pod.UID)
 	}
 	if len(expected) == 0 {
 		return nil, fmt.Errorf(

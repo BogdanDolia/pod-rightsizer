@@ -309,6 +309,38 @@ func TestEvaluateSLO(t *testing.T) {
 	}
 }
 
+func TestEvaluateSLORejectsInvalidFactsWithoutPhases(t *testing.T) {
+	result := RunResult{
+		Requests:          100,
+		HTTPErrors:        200,
+		ActualRPS:         100,
+		HTTPErrorRate:     0,
+		P50Latency:        time.Millisecond,
+		P95Latency:        time.Millisecond,
+		P99Latency:        time.Millisecond,
+		TerminationReason: TerminationDurationElapsed,
+	}
+	assessment, err := result.EvaluateSLO(SLO{
+		MinimumRPS:           90,
+		MaximumHTTPErrorRate: 0,
+		MaximumP95Latency:    0,
+	})
+	if err != nil || assessment.Passed || !strings.Contains(strings.Join(assessment.Violations, " "), "HTTP errors exceed HTTP requests") {
+		t.Fatalf("EvaluateSLO() = %#v, %v, want the count violation without phase metadata", assessment, err)
+	}
+
+	result.HTTPErrors = 0
+	result.HTTPErrorRate = -1
+	assessment, err = result.EvaluateSLO(SLO{
+		MinimumRPS:           90,
+		MaximumHTTPErrorRate: 1,
+		MaximumP95Latency:    0,
+	})
+	if err != nil || assessment.Passed || !strings.Contains(strings.Join(assessment.Violations, " "), "HTTP error rate") {
+		t.Fatalf("EvaluateSLO() = %#v, %v, want the ratio violation", assessment, err)
+	}
+}
+
 func TestEvaluateSLORejectsNonFiniteThreshold(t *testing.T) {
 	_, err := (RunResult{}).EvaluateSLO(SLO{MinimumRPS: math.NaN()})
 	if err == nil || !strings.Contains(err.Error(), "finite non-negative") {

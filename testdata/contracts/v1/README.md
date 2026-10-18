@@ -65,6 +65,12 @@ These documents are valid. A failed SLO, a missing signal, or an unverified sour
 | `valid/comparison-resource/` | Intent `resource_candidate`. Resources differ, image and source match. Both SLOs passed, `ciVerdict` `pass`, budget still `not_evaluated`. |
 | `valid/comparison-rejected/` | Intent `resource_candidate`. Candidate SLO failed, `ciVerdict` `fail`. |
 | `valid/comparison-not-comparable/` | Runtime version differs. `comparability` `not_comparable`, deltas null, `ciVerdict` `not_comparable`. |
+| `valid/direct-pod/` | Requested `strict_direct` route to one Pod, with no Service name. The observation records a synthetic verified `direct_pod` proof, `selected_pod` scope, one replica, and a runner clock mapping. `serviceMapping` stays `unverified` / `none`. This is a shape example, not a live route. |
+| `valid/direct-pod-cancelled/observations.json` | Strict direct request cancelled before discovery. No UID, runner, interval, or metrics are invented. |
+| `valid/direct-pod-control-lost/observations.json` | Load started, then the control channel was lost. Termination is `control_channel_lost`. Stop is `unknown`. The route is not verified. |
+| `valid/service-route-experiment/observations.json` | A Service route is verified only by `endpoint_slice`. That proof is not a direct-pod proof. |
+| `valid/comparison-route-differ/comparison-result.json` | Route mode differs. The pair is `not_comparable` even when the ephemeral Pod UID also differs. |
+| `valid/comparison-pod-uid-differ/comparison-result.json` | Route, scope, engine, and runner conditions match. A differing ephemeral Pod UID stays comparable and `inconclusive`. |
 
 `valid/resource-candidate/resource-patch.yaml` is a synthetic strategic-merge example. `cpu: null` means the limit is absent. It is not an unknown quantity and it was not applied. The repository ignore rule for tool-written `resource-patch.yaml` files also matches this path. The fixture is tracked anyway; `.gitignore` is unchanged so real tool output stays ignored.
 
@@ -164,6 +170,16 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 | `invalid/load-not-started-with-latency.json` | observations | a load that did not start cannot report known latency |
 | `invalid/load-not-started-with-rates.json` | observations | zero requests keep `actualRps`, `httpErrorRate`, and `usefulThroughputRps` null |
 | `invalid/load-not-started-with-interval.json` | observations | a load that did not start keeps `interval` null |
+| `invalid/direct-verified-by-endpoint-slice.json` | observations | `endpoint_slice` cannot verify `direct_pod` |
+| `invalid/direct-verified-without-proof.json` | observations | verified `direct_pod` requires `proofMethod` `direct_pod` |
+| `invalid/clock-unknown-zero-uncertainty.json` | observations | an unknown clock method cannot carry uncertainty 0 |
+| `invalid/selected-pod-aggregate-verified.json` | observations | `aggregate_only` cannot be a verified `selected_pod` |
+| `invalid/multi-replica-deployment-wide.json` | observations | `deploymentWide` requires replica count 1 |
+| `invalid/confirmed-stop-after-control-loss.json` | observations | a lost channel cannot be a confirmed stop |
+| `invalid/direct-verified-by-service-mapping.json` | observations | a verified direct experiment cannot reuse a verified Service mapping |
+| `invalid/job-template-verified-direct.json` | observations | a Job template is not an observed runner |
+| `invalid/mesh-bypass-without-absence.json` | observations | `meshBypassed` requires `transparentProxy` `known_absent` |
+| `invalid/route-differ-but-pass.json` | comparison result | a differing route mode cannot stay comparable |
 
 ## Checks left to later tasks
 
@@ -174,5 +190,8 @@ Markdown files are fixture bodies so completed manifests that name `report.md` a
 - T07 must refuse `gitopsExport` `ready` unless workload discovery is `read`.
 - T15 must refuse candidate `validated` unless workload discovery is `read`.
 - T09 must recompute `recommender-core-1` from `replayInputs`.
-- T14 must derive `checkedConditions` from the two packages. A schema-valid comparison can still lie about those conditions until that task exists.
+- T05 must resolve Deployment, ReplicaSet, Pod, and container identity. A schema UID is not that join.
+- T10 must run the external k6 Job and observe the runner. A fixture proof is not that run.
+- T14 must derive `checkedConditions` from the two packages, including route mode, metrics scope, engine, runner resources, and runner placement. A schema-valid comparison can still lie about those conditions until that task exists. Ephemeral Pod UIDs need not match.
+- T17 is the direct-pod end-to-end run. These fixtures do not execute it.
 - T08 must hash artifact bytes and compare `outcome` with `analysis.json`.

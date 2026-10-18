@@ -5,6 +5,7 @@ import (
 	"time"
 
 	corek8s "github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
+	coremetrics "github.com/HelixThinker/pod-rightsizer/pkg/metrics"
 	providermetrics "github.com/HelixThinker/pod-rightsizer/pkg/providers/metrics"
 )
 
@@ -106,5 +107,22 @@ func sampleFromSnapshot(snapshot corek8s.ContainerMetrics) (providermetrics.Samp
 		Workload:        snapshot.Workload,
 		CPUSourcePod:    snapshot.CPUSourcePod,
 		MemorySourcePod: snapshot.MemorySourcePod,
+		Scope:           coremetrics.ScopeFromSnapshot(resourceFromSnapshot(snapshot)),
 	}, true
+}
+
+func resourceFromSnapshot(snapshot corek8s.ContainerMetrics) coremetrics.ResourceMetrics {
+	return coremetrics.ResourceMetrics{
+		ContainerName:   snapshot.ContainerName,
+		Timestamp:       snapshot.Timestamp,
+		Window:          snapshot.Window,
+		CPUUsage:        snapshot.CPUUsage,
+		MemoryUsage:     snapshot.MemoryUsage,
+		PolledAt:        snapshot.PolledAt,
+		Pods:            snapshot.Pods,
+		Coverage:        snapshot.Coverage,
+		Workload:        snapshot.Workload,
+		CPUSourcePod:    snapshot.CPUSourcePod,
+		MemorySourcePod: snapshot.MemorySourcePod,
+	}
 }

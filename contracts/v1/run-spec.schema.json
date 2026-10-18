@@ -127,17 +127,56 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["serviceName", "namespace", "url"],
+      "required": ["namespace", "url"],
       "properties": {
         "serviceName": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
         "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
         "url": {
-          "description": "Null for observe mode. A URL does not by itself prove the Service routes to the Deployment.",
+          "description": "Null for observe mode. A URL does not by itself prove the Service or the direct Pod route.",
           "oneOf": [
             { "type": "null" },
             { "$ref": "defs.schema.json#/$defs/httpUrl" }
           ]
-        }
+        },
+        "cluster": {
+          "description": "Cluster reference without credentials. There is no kubeconfig or token field.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "context": { "type": "string", "minLength": 1 }
+          }
+        },
+        "pod": { "$ref": "defs.schema.json#/$defs/k8sSubdomain" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "httpHost": { "type": "string", "minLength": 1 },
+        "tlsServerName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "route": {
+      "description": "Requested route. direct_pod does not require target.serviceName. Omission keeps the Service-oriented target.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["direct_pod", "service", "ingress", "port_forward"] },
+        "requirement": { "enum": ["legacy", "strict_direct"] }
+      }
+    },
+    "runner": {
+      "description": "Requested runner placement. These values are not observations.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["placement"],
+      "properties": {
+        "placement": { "enum": ["in_cluster", "external", "unknown"] },
+        "namespace": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
+        "imageRef": { "type": "string", "minLength": 1 },
+        "cpuMilli": { "type": "integer", "minimum": 0 },
+        "memoryBytes": { "type": "integer", "minimum": 0 },
+        "nodeClass": { "type": "string", "minLength": 1 },
+        "zone": { "type": "string", "minLength": 1 }
       }
     },
     "scenario": {
@@ -378,6 +417,60 @@
         "properties": {
           "target": { "properties": { "url": { "type": "string" } } },
           "slo": { "type": "object" }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "required": ["route"],
+          "properties": {
+            "route": {
+              "properties": { "mode": { "const": "direct_pod" } },
+              "required": ["mode"]
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "target": { "required": ["serviceName"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "route": {
+            "properties": {
+              "mode": { "const": "direct_pod" },
+              "requirement": { "const": "strict_direct" }
+            },
+            "required": ["mode", "requirement"]
+          }
+        },
+        "required": ["route"]
+      },
+      "then": {
+        "required": ["runner"],
+        "properties": {
+          "target": { "required": ["cluster", "pod", "port"] },
+          "runner": {
+            "required": ["placement"],
+            "properties": { "placement": { "const": "in_cluster" } }
+          },
+          "scenario": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": {
+                "allOf": [
+                  { "contains": { "const": "direct_route_proof" } },
+                  { "contains": { "const": "in_cluster_runner" } },
+                  { "contains": { "const": "selected_pod_metrics" } }
+                ]
+              }
+            }
+          }
         }
       }
     }

@@ -111,7 +111,7 @@
       "id": "comparison-values",
       "owner": "T14",
       "executedBy": "none",
-      "statement": "checkedConditions must be computed from the two packages. Same-run ids, unknown node class, and runtime setting or version diffs are not_comparable and cannot be ciVerdict pass.",
+      "statement": "checkedConditions must be computed from the two packages. Same-run ids, unknown node class, runtime setting or version diffs, and a differing or unknown route mode, metrics scope, engine, runner resources, or runner placement are not_comparable and cannot be ciVerdict pass. Ephemeral Pod UIDs may differ. This schema records those conditions. It does not compare two packages.",
       "example": "valid/comparison-not-comparable/comparison-result.json"
     },
     {
@@ -127,6 +127,55 @@
       "executedBy": "none",
       "statement": "A review resource-patch.yaml is emitted only after candidate validation. Experimental dry-run YAML is a different purpose and is not a review diff.",
       "example": "valid/resource-candidate/manifest.json"
+    },
+    {
+      "id": "direct-route-consistency",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/providers/loadtest.TestDirectPodContract",
+      "statement": "A strict in-cluster direct_pod outcome is usable only with a consistent selected_pod scope, a proven clock mapping, and a confirmed connected stop. Service endpoint_slice proof stays on the service branch. HTTP 200, a requested URL, or a declared proof does not become verified. An unknown runner, a different dial address, a redirect, a reused name or IP with a new Pod UID, foreign or mixed metrics, an unknown clock mapping, and a window that is not inside the measured interval after uncertainty are unsuitable. Cancellation does not invent proof. A lost control channel is a failed outcome with an unknown stop, not a confirmed runner stop. One Pod of several replicas is not a validated Deployment. Ephemeral Pod UID is not a comparability condition. A transport symptom does not prove a load-balancer or application cause. These checks use presented facts. They do not join a live owner chain or run a remote Job.",
+      "example": "valid/direct-pod/observations.json"
+    },
+    {
+      "id": "selected-pod-window-filter",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/metrics.TestClassifySelectedPodFiltersBeforeFold",
+      "statement": "Foreign Pod samples, runner samples, and source windows that are not inside the measured interval after clock uncertainty are discarded before the high-water fold. An overlapping window of the selected Pod does not increase the independent count, and its higher CPU maximum is kept.",
+      "example": "valid/direct-pod/observations.json"
+    },
+    {
+      "id": "selected-pod-mixed-replica",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/metrics.TestMixedReplicaDoesNotRaiseTheMaximum",
+      "statement": "A snapshot that also contains another replica keeps only the selected Pod as the primary CPU and memory input. The other replica is diagnostic and does not raise the folded maximum.",
+      "example": "valid/direct-pod/observations.json"
+    },
+    {
+      "id": "selected-pod-aggregate",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/metrics.TestAggregateSampleCannotClaimSelectedPod",
+      "statement": "A Deployment aggregate with no per-pod rows is aggregate_only. It cannot be a verified selected_pod scope, and it is not decomposed into the selected Pod.",
+      "example": "valid/direct-pod/observations.json"
+    },
+    {
+      "id": "metrics-object-uid",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/metrics.TestMetricsObjectUIDIsNotThePodUID",
+      "statement": "PodMetrics metadata UID is not assumed to be the Pod UID. A different metrics-object UID does not verify the selected Pod, and selecting by that metrics UID is unlinked. Equal listed and metrics-object UIDs can pass this contract check. That equality is not an owner-chain join.",
+      "example": "valid/direct-pod/observations.json"
+    },
+    {
+      "id": "clock-mapping-uncertainty",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/metrics.TestUnknownMappingDoesNotUseZeroUncertainty",
+      "statement": "A runner clock with an unknown mapping is not zero uncertainty. The source window is discarded and does not become an independent sample.",
+      "example": "valid/direct-pod/observations.json"
+    },
+    {
+      "id": "load-types-engine-neutral",
+      "owner": "T03.1",
+      "executedBy": "go-test:pkg/providers/loadtest.TestImportsStayEngineNeutral",
+      "statement": "The shared load types do not import the legacy generator, the local adapter, k6, os/exec, or Kubernetes client packages.",
+      "example": "valid/direct-pod/run-spec.json"
     }
   ]
 }

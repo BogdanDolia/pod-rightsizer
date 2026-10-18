@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "ComparisonResult",
+  "dataClass": "synthetic_fixture",
+  "comparisonId": "f1111111-1111-4111-8111-111111111111",
+  "intent": "code_regression",
+  "baseline": {
+    "runId": "11111111-1111-4111-8111-111111111111",
+    "manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "candidate": {
+    "runId": "77777777-7777-4777-8777-777777777777",
+    "manifestSha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "comparability": "not_comparable",
+  "reasonCodes": ["not_comparable"],
+  "checkedConditions": {
+    "logicalService": "match",
+    "scenario": "match",
+    "loadShape": "match",
+    "resources": "match",
+    "replicas": "match",
+    "runtimeSettings": "match",
+    "runtimeVersion": "match",
+    "profile": "match",
+    "policy": "match",
+    "nodeClass": "match",
+    "imageDigest": "differ",
+    "sourceRevision": "differ",
+    "deploymentUid": "differ",
+    "deploymentGeneration": "differ",
+    "authFixture": "match",
+    "dataFixture": "match",
+    "latencySemantics": "match",
+    "environmentRole": "match",
+    "routeMode": "differ",
+    "metricsScope": "match",
+    "engine": "match",
+    "runnerResources": "match",
+    "runnerPlacement": "match",
+    "podUid": "differ"
+  },
+  "deltas": null,
+  "budget": {
+    "outcome": "not_evaluated",
+    "noisePolicyVersion": null
+  },
+  "baselineSlo": "passed",
+  "candidateSlo": "passed",
+  "ciVerdict": "not_comparable"
+}

@@ -630,7 +630,10 @@
         "application_checks",
         "useful_throughput",
         "dropped_work",
-        "generator_saturation"
+        "generator_saturation",
+        "direct_route_proof",
+        "in_cluster_runner",
+        "selected_pod_metrics"
       ]
     },
     "requestedLatencySemantics": {
@@ -642,7 +645,7 @@
       "enum": ["until_response_headers", "k6_http_req_duration", "not_applicable", "unknown"]
     },
     "actualPhase": {
-      "description": "Actual phase bounds on the collector clock. A planned duration does not prove these timestamps. A failed or cancelled run may record only the prefix that started.",
+      "description": "Actual phase bounds. collector_local is the in-process collector clock. runner is the remote runner clock and is not renamed to collector_local. source is the metrics source clock. unknown is not a proven mapping. A planned duration does not prove these timestamps. A failed or cancelled run may record only the prefix that started.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "startedAt", "finishedAt", "clock"],
@@ -650,7 +653,10 @@
         "name": { "enum": ["warmup", "measured", "cooldown"] },
         "startedAt": { "$ref": "#/$defs/dateTime" },
         "finishedAt": { "$ref": "#/$defs/dateTime" },
-        "clock": { "const": "collector_local" }
+        "clock": {
+          "description": "Domain of startedAt and finishedAt. A runner timestamp stays runner.",
+          "enum": ["collector_local", "runner", "source", "unknown"]
+        }
       }
     },
     "loadChecks": {
@@ -683,6 +689,393 @@
       "additionalProperties": false,
       "required": ["state"],
       "properties": { "state": { "const": "unknown" } }
+    },
+    "identityFact": {
+      "description": "known carries the value that was read. unknown and not_obtained carry no value. A name is not substituted for a missing value.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "enum": ["unknown", "not_obtained"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "uidFact": {
+      "description": "A known UID is a UUID that was read. A Pod name, IP, or label is not a UID.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "enum": ["unknown", "not_obtained"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": { "$ref": "#/$defs/uuid" }
+          }
+        }
+      ]
+    },
+    "dialFact": {
+      "description": "The network dial address. httpHost and tlsServerName are not the dial address.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "enum": ["unknown", "not_obtained"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "ip", "port"],
+          "properties": {
+            "state": { "const": "known" },
+            "ip": { "type": "string", "minLength": 1 },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "httpHost": { "type": "string", "minLength": 1 },
+            "tlsServerName": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "clockMapping": {
+      "description": "How two clock domains were related. Unknown method cannot carry a numeric uncertainty, including zero.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "method", "uncertaintyNs"],
+      "properties": {
+        "from": { "enum": ["collector_local", "runner", "source", "unknown"] },
+        "to": { "enum": ["collector_local", "runner", "source", "unknown"] },
+        "method": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state"],
+              "properties": { "state": { "const": "unknown" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "value"],
+              "properties": {
+                "state": { "const": "known" },
+                "value": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "uncertaintyNs": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state"],
+              "properties": { "state": { "const": "unknown" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["state", "nanoseconds"],
+              "properties": {
+                "state": { "const": "known" },
+                "nanoseconds": { "type": "integer", "minimum": 0 }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "properties": { "state": { "const": "unknown" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["method"]
+          },
+          "then": {
+            "properties": {
+              "uncertaintyNs": {
+                "properties": { "state": { "const": "unknown" } },
+                "required": ["state"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "directExperiment": {
+      "description": "Requested and observed target, route, runner, metrics scope, and clock. Omitting this object does not claim direct_pod. endpoint_slice verifies only a Service route. A Job template is not an observed runner. Unknown clock uncertainty is not zero. This object does not prove a live route; T05 and T10 do that.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement", "requested", "observed", "stop"],
+      "properties": {
+        "requirement": { "enum": ["legacy", "strict_direct"] },
+        "requested": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["routeMode", "runnerPlacement"],
+          "properties": {
+            "routeMode": { "enum": ["direct_pod", "service", "ingress", "port_forward", "unknown"] },
+            "runnerPlacement": { "enum": ["in_cluster", "external", "unknown"] },
+            "clusterName": { "type": "string", "minLength": 1 },
+            "clusterContext": { "type": "string", "minLength": 1 },
+            "namespace": { "$ref": "#/$defs/k8sLabel" },
+            "deployment": { "$ref": "#/$defs/k8sSubdomain" },
+            "pod": { "$ref": "#/$defs/k8sSubdomain" },
+            "container": { "$ref": "#/$defs/k8sLabel" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "httpHost": { "type": "string", "minLength": 1 },
+            "tlsServerName": { "type": "string", "minLength": 1 },
+            "serviceName": { "$ref": "#/$defs/k8sLabel" }
+          }
+        },
+        "observed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["routeMode", "routeStatus", "proofMethod", "transparentProxy"],
+          "properties": {
+            "routeMode": { "enum": ["direct_pod", "service", "ingress", "port_forward", "unknown"] },
+            "routeStatus": { "enum": ["verified", "unverified", "declared", "mismatch", "unknown"] },
+            "proofMethod": { "enum": ["direct_pod", "endpoint_slice", "declared_only", "none"] },
+            "serviceName": { "$ref": "#/$defs/k8sLabel" },
+            "workloadLinked": { "type": "boolean" },
+            "deploymentUid": { "$ref": "#/$defs/uidFact" },
+            "podUid": { "$ref": "#/$defs/uidFact" },
+            "container": { "$ref": "#/$defs/identityFact" },
+            "image": { "$ref": "#/$defs/identityFact" },
+            "dial": { "$ref": "#/$defs/dialFact" },
+            "usedDial": { "$ref": "#/$defs/dialFact" },
+            "runnerPlacement": { "enum": ["in_cluster", "external", "unknown"] },
+            "runnerSource": { "enum": ["observed", "job_template", "in_process", "not_obtained"] },
+            "runnerPodUid": { "$ref": "#/$defs/uidFact" },
+            "runnerJobUid": { "$ref": "#/$defs/uidFact" },
+            "runnerImageDigest": { "$ref": "#/$defs/identityFact" },
+            "transparentProxy": { "enum": ["known_present", "known_absent", "unknown"] },
+            "meshBypassed": { "type": "boolean" },
+            "changes": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "metricsScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "status", "attribution"],
+          "properties": {
+            "kind": { "enum": ["selected_pod", "deployment_aggregate", "diagnostic"] },
+            "status": { "enum": ["verified", "unverified", "aggregate_only", "mismatch", "unknown"] },
+            "attribution": { "enum": ["per_pod", "aggregate_only", "unknown"] },
+            "podUid": { "$ref": "#/$defs/uuid" },
+            "container": { "$ref": "#/$defs/k8sLabel" },
+            "expected": { "type": "integer", "minimum": 0 },
+            "observed": { "type": "integer", "minimum": 0 },
+            "replicaCount": { "type": "integer", "minimum": 1 },
+            "deploymentWide": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "attribution": { "const": "aggregate_only" } },
+                "required": ["attribution"]
+              },
+              "then": {
+                "properties": { "status": { "enum": ["unverified", "aggregate_only", "mismatch", "unknown"] } }
+              }
+            },
+            {
+              "if": {
+                "properties": { "deploymentWide": { "const": true } },
+                "required": ["deploymentWide"]
+              },
+              "then": { "properties": { "replicaCount": { "const": 1 } } }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": { "const": "selected_pod" },
+                  "status": { "const": "verified" }
+                },
+                "required": ["kind", "status"]
+              },
+              "then": {
+                "properties": { "attribution": { "const": "per_pod" } },
+                "required": ["podUid", "container", "replicaCount", "deploymentWide"]
+              }
+            }
+          ]
+        },
+        "clockMapping": { "$ref": "#/$defs/clockMapping" },
+        "stop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "channel"],
+          "properties": {
+            "state": { "enum": ["not_requested", "requested", "confirmed", "unknown"] },
+            "channel": { "enum": ["connected", "lost", "unknown"] },
+            "inProcess": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "channel": { "const": "lost" } },
+                "required": ["channel"]
+              },
+              "then": { "properties": { "state": { "const": "unknown" } } }
+            }
+          ]
+        },
+        "transport": {
+          "description": "The symptom was observed. cause unknown is not a load balancer or application classification.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["symptom", "cause", "causeProven"],
+          "properties": {
+            "symptom": { "type": "string", "minLength": 1 },
+            "cause": { "type": "string", "minLength": 1 },
+            "causeProven": { "type": "boolean" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "observed": {
+                "properties": {
+                  "routeMode": { "const": "direct_pod" },
+                  "routeStatus": { "const": "verified" }
+                },
+                "required": ["routeMode", "routeStatus"]
+              }
+            },
+            "required": ["observed"]
+          },
+          "then": {
+            "required": ["metricsScope", "clockMapping"],
+            "properties": {
+              "observed": {
+                "properties": {
+                  "proofMethod": { "const": "direct_pod" },
+                  "workloadLinked": { "const": true },
+                  "runnerPlacement": { "const": "in_cluster" },
+                  "runnerSource": { "const": "observed" },
+                  "changes": { "maxItems": 0 }
+                },
+                "required": ["workloadLinked", "deploymentUid", "podUid", "container", "image", "dial", "usedDial", "runnerPlacement", "runnerSource", "runnerPodUid", "runnerJobUid", "runnerImageDigest"]
+              },
+              "stop": {
+                "properties": {
+                  "state": { "const": "confirmed" },
+                  "channel": { "const": "connected" }
+                }
+              },
+              "metricsScope": {
+                "properties": {
+                  "kind": { "const": "selected_pod" },
+                  "status": { "const": "verified" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "observed": {
+                "properties": {
+                  "routeMode": { "const": "service" },
+                  "routeStatus": { "const": "verified" }
+                },
+                "required": ["routeMode", "routeStatus"]
+              }
+            },
+            "required": ["observed"]
+          },
+          "then": {
+            "properties": {
+              "observed": {
+                "properties": { "proofMethod": { "const": "endpoint_slice" } },
+                "required": ["serviceName", "workloadLinked"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "observed": {
+                "properties": {
+                  "routeMode": { "const": "direct_pod" },
+                  "proofMethod": { "const": "endpoint_slice" }
+                },
+                "required": ["routeMode", "proofMethod"]
+              }
+            },
+            "required": ["observed"]
+          },
+          "then": {
+            "properties": {
+              "observed": {
+                "properties": { "routeStatus": { "enum": ["unverified", "declared", "mismatch", "unknown"] } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "observed": {
+                "properties": { "runnerSource": { "const": "job_template" } },
+                "required": ["runnerSource"]
+              }
+            },
+            "required": ["observed"]
+          },
+          "then": {
+            "properties": {
+              "observed": {
+                "properties": { "routeStatus": { "enum": ["unverified", "declared", "mismatch", "unknown"] } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "observed": {
+                "properties": { "meshBypassed": { "const": true } },
+                "required": ["meshBypassed"]
+              }
+            },
+            "required": ["observed"]
+          },
+          "then": {
+            "properties": {
+              "observed": { "properties": { "transparentProxy": { "const": "known_absent" } } }
+            }
+          }
+        }
+      ]
     }
   }
 }

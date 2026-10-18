@@ -46,6 +46,10 @@ func forbiddenImport(path string) bool {
 		return true
 	case strings.Contains(strings.ToLower(path), "k6"):
 		return true
+	case strings.Contains(path, "k8s.io/"):
+		return true
+	case strings.Contains(path, "pkg/kubernetes"):
+		return true
 	default:
 		return false
 	}

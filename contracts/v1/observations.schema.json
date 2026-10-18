@@ -94,12 +94,12 @@
     "serviceMapping": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "serviceName", "routeProof"],
+      "required": ["status", "routeProof"],
       "properties": {
         "status": { "$ref": "defs.schema.json#/$defs/targetState" },
         "serviceName": { "$ref": "defs.schema.json#/$defs/k8sLabel" },
         "routeProof": {
-          "description": "endpoint_slice is the only proof that verifies the route. declared_only and none stay unverified.",
+          "description": "endpoint_slice verifies a Service route only. It does not verify direct_pod. declared_only and none stay unverified. A direct_pod experiment uses experiment.observed.proofMethod direct_pod and does not require serviceName.",
           "enum": ["endpoint_slice", "declared_only", "none"]
         }
       },
@@ -155,7 +155,8 @@
             "invalid_configuration",
             "invalid_target",
             "internal_error",
-            "not_started"
+            "not_started",
+            "control_channel_lost"
           ]
         },
         "requests": { "type": "integer", "minimum": 0 },
@@ -223,7 +224,10 @@
               "properties": {
                 "startedAt": { "$ref": "defs.schema.json#/$defs/dateTime" },
                 "finishedAt": { "$ref": "defs.schema.json#/$defs/dateTime" },
-                "clock": { "const": "collector_local" }
+                "clock": {
+                  "description": "collector_local is the in-process clock. runner is not renamed to collector_local. A non-collector clock requires experiment.clockMapping.",
+                  "enum": ["collector_local", "runner", "source", "unknown"]
+                }
               }
             }
           ]
@@ -468,7 +472,16 @@
                   "missing_pod",
                   "identity_changed",
                   "container_restart",
-                  "conflicting_snapshot"
+                  "conflicting_snapshot",
+                  "foreign_pod",
+                  "foreign_container",
+                  "runner_metrics",
+                  "aggregate_only",
+                  "missing_target_coverage",
+                  "metrics_uid_unlinked",
+                  "mixed_replicas",
+                  "clock_mapping_unknown",
+                  "clock_uncertainty_boundary"
                 ]
               }
             ]
@@ -535,7 +548,8 @@
         "independentWindowCount": { "type": "integer", "minimum": 0 },
         "discardedWindowCount": { "type": "integer", "minimum": 0 }
       }
-    }
+    },
+    "experiment": { "$ref": "defs.schema.json#/$defs/directExperiment" }
   },
   "allOf": [
     {
@@ -667,6 +681,106 @@
               "discardedWindowCount": { "const": 0 }
             }
           }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "required": ["experiment"],
+          "properties": {
+            "experiment": {
+              "properties": {
+                "observed": {
+                  "properties": { "routeMode": { "const": "direct_pod" } },
+                  "required": ["routeMode"]
+                }
+              },
+              "required": ["observed"]
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "serviceMapping": { "required": ["serviceName"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "experiment": {
+            "properties": {
+              "observed": {
+                "properties": {
+                  "routeMode": { "const": "direct_pod" },
+                  "routeStatus": { "const": "verified" }
+                },
+                "required": ["routeMode", "routeStatus"]
+              }
+            },
+            "required": ["observed"]
+          }
+        },
+        "required": ["experiment"]
+      },
+      "then": {
+        "properties": {
+          "serviceMapping": {
+            "properties": {
+              "status": { "const": "unverified" },
+              "routeProof": { "const": "none" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "load": {
+            "properties": {
+              "phases": {
+                "contains": {
+                  "type": "object",
+                  "properties": { "clock": { "enum": ["runner", "source", "unknown"] } },
+                  "required": ["clock"]
+                }
+              }
+            },
+            "required": ["phases"]
+          }
+        },
+        "required": ["load"]
+      },
+      "then": {
+        "required": ["experiment"],
+        "properties": {
+          "experiment": { "required": ["clockMapping"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "load": {
+            "properties": {
+              "interval": {
+                "type": "object",
+                "properties": { "clock": { "enum": ["runner", "source", "unknown"] } },
+                "required": ["clock"]
+              }
+            },
+            "required": ["interval"]
+          }
+        },
+        "required": ["load"]
+      },
+      "then": {
+        "required": ["experiment"],
+        "properties": {
+          "experiment": { "required": ["clockMapping"] }
         }
       }
     }

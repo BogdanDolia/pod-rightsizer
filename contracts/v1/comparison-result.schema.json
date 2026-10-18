@@ -134,7 +134,28 @@
         "authFixture": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
         "dataFixture": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
         "latencySemantics": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
-        "environmentRole": { "$ref": "defs.schema.json#/$defs/conditionCheck" }
+        "environmentRole": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "routeMode": {
+          "description": "direct_pod, service, ingress, and port_forward are different conditions. unknown is not a match. T14 evaluates this; the engine is not this schema.",
+          "$ref": "defs.schema.json#/$defs/conditionCheck"
+        },
+        "metricsScope": {
+          "description": "Primary metrics scope. selected_pod does not match a Deployment aggregate.",
+          "$ref": "defs.schema.json#/$defs/conditionCheck"
+        },
+        "engine": { "$ref": "defs.schema.json#/$defs/conditionCheck" },
+        "runnerResources": {
+          "description": "Material runner CPU and memory. The same runner image is not this condition.",
+          "$ref": "defs.schema.json#/$defs/conditionCheck"
+        },
+        "runnerPlacement": {
+          "description": "Node class, zone, and whether the runner shares a node or zone with the target.",
+          "$ref": "defs.schema.json#/$defs/conditionCheck"
+        },
+        "podUid": {
+          "description": "Ephemeral Pod UID. differ is allowed between runs. It is not a material condition and unknown does not by itself make the pair not_comparable.",
+          "$ref": "defs.schema.json#/$defs/conditionCheck"
+        }
       }
     },
     "deltas": {
@@ -169,7 +190,12 @@
         { "properties": { "latencySemantics": { "const": "unknown" } }, "required": ["latencySemantics"] },
         { "properties": { "environmentRole": { "const": "unknown" } }, "required": ["environmentRole"] },
         { "properties": { "deploymentUid": { "const": "unknown" } }, "required": ["deploymentUid"] },
-        { "properties": { "deploymentGeneration": { "const": "unknown" } }, "required": ["deploymentGeneration"] }
+        { "properties": { "deploymentGeneration": { "const": "unknown" } }, "required": ["deploymentGeneration"] },
+        { "properties": { "routeMode": { "const": "unknown" } }, "required": ["routeMode"] },
+        { "properties": { "metricsScope": { "const": "unknown" } }, "required": ["metricsScope"] },
+        { "properties": { "engine": { "const": "unknown" } }, "required": ["engine"] },
+        { "properties": { "runnerResources": { "const": "unknown" } }, "required": ["runnerResources"] },
+        { "properties": { "runnerPlacement": { "const": "unknown" } }, "required": ["runnerPlacement"] }
       ]
     },
     "sharedMatch": {
@@ -399,6 +425,23 @@
           "reasonCodes": { "contains": { "const": "runtime_version_differs" } }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "checkedConditions": {
+            "anyOf": [
+              { "properties": { "routeMode": { "enum": ["differ", "unknown"] } }, "required": ["routeMode"] },
+              { "properties": { "metricsScope": { "enum": ["differ", "unknown"] } }, "required": ["metricsScope"] },
+              { "properties": { "engine": { "enum": ["differ", "unknown"] } }, "required": ["engine"] },
+              { "properties": { "runnerResources": { "enum": ["differ", "unknown"] } }, "required": ["runnerResources"] },
+              { "properties": { "runnerPlacement": { "enum": ["differ", "unknown"] } }, "required": ["runnerPlacement"] }
+            ]
+          }
+        },
+        "required": ["checkedConditions"]
+      },
+      "then": { "properties": { "comparability": { "const": "not_comparable" } } }
     }
   ]
 }

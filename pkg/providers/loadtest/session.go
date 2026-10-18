@@ -111,14 +111,42 @@ func (s *Session) MeasuredDuration() (time.Duration, error) {
 }
 
 // StartPhase emits the start edge and then records the phase.
-// The observer runs before this method returns.
+// The observer runs before this method returns. The clock is collector_local.
 func (s *Session) StartPhase(name PhaseName) error {
 	s.mu.Lock()
 	event, err := s.prepareStart(name)
+	s.mu.Unlock()
 	if err != nil {
-		s.mu.Unlock()
 		return err
 	}
+	return s.commitStarted(event)
+}
+
+// StartPhaseAt records a phase start at a supplied time and clock domain.
+// The clock is stored as given. A runner timestamp is not renamed to
+// collector_local. The observer runs before this method returns.
+func (s *Session) StartPhaseAt(name PhaseName, at time.Time, clock string) error {
+	s.mu.Lock()
+	event, err := s.prepareStart(name)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if at.IsZero() || !knownPhaseClock(clock) {
+		return fmt.Errorf("%w: phase clock must be known", ErrInvalidRequest)
+	}
+	event.At = at
+	event.Clock = clock
+	return s.commitStarted(event)
+}
+
+func (s *Session) commitStarted(event PhaseEvent) error {
+	s.mu.Lock()
+	if s.finished || (s.open != nil) {
+		s.mu.Unlock()
+		return errors.New("load phase cannot start")
+	}
+	name := event.Name
 	s.open = &name
 	s.mu.Unlock()
 
@@ -132,28 +160,63 @@ func (s *Session) StartPhase(name PhaseName) error {
 	}
 
 	s.mu.Lock()
-	s.commitStart(name, event.At)
+	s.commitStart(name, event.At, event.Clock)
 	s.mu.Unlock()
 	return nil
 }
 
 // FinishPhase emits the finish edge and records the actual finish time.
+// The clock stays the clock recorded when the phase started.
 func (s *Session) FinishPhase(name PhaseName) error {
 	s.mu.Lock()
 	event, err := s.prepareFinish(name)
+	s.mu.Unlock()
 	if err != nil {
-		s.mu.Unlock()
 		return err
 	}
-	s.mu.Unlock()
+	return s.commitFinished(event)
+}
 
+// FinishPhaseAt records a phase finish at a supplied time. clock must be the
+// same domain as the start. A different domain is stored as unknown rather
+// than renamed to collector_local.
+func (s *Session) FinishPhaseAt(name PhaseName, at time.Time, clock string) error {
+	s.mu.Lock()
+	event, err := s.prepareFinish(name)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if at.IsZero() || !knownPhaseClock(clock) {
+		return fmt.Errorf("%w: phase clock must be known", ErrInvalidRequest)
+	}
+	event.At = at
+	event.Clock = clock
+	return s.commitFinished(event)
+}
+
+func (s *Session) commitFinished(event PhaseEvent) error {
 	if err := s.emit(event); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	s.recordFinish(name, event.At)
+	s.recordFinish(event.Name, event.At, event.Clock)
 	s.mu.Unlock()
 	return nil
+}
+
+// SetExperiment records observed target, route, runner, clock, and scope
+// before Finish. It does not promote an unknown or declared proof to verified.
+func (s *Session) SetExperiment(facts ExperimentFacts) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outcome.Target = facts.Target
+	s.outcome.Route = facts.Route
+	s.outcome.Runner = facts.Runner
+	s.outcome.Stop = facts.Stop
+	s.outcome.ClockMapping = facts.ClockMapping
+	s.outcome.Metrics = facts.Metrics
+	s.outcome.Transport = facts.Transport
 }
 
 // SetMeasurements records measured-phase HTTP facts. Warmup and cooldown
@@ -250,7 +313,7 @@ func (s *Session) Finish(reason TerminationReason, runErr error) (Outcome, error
 		}
 		s.mu.Lock()
 		if s.open != nil && *s.open == finishEvent.Name {
-			s.recordFinish(finishEvent.Name, finishEvent.At)
+			s.recordFinish(finishEvent.Name, finishEvent.At, finishEvent.Clock)
 		}
 		s.mu.Unlock()
 	}
@@ -268,7 +331,7 @@ func (s *Session) forceFinish(reason TerminationReason, err error) (Outcome, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.open != nil {
-		s.recordFinish(*s.open, s.now())
+		s.recordFinish(*s.open, s.now(), ClockCollectorLocal)
 	}
 	if !s.finished {
 		if reason == "" {
@@ -505,7 +568,10 @@ func (s *Session) prepareFinish(name PhaseName) (PhaseEvent, error) {
 	}, nil
 }
 
-func (s *Session) commitStart(name PhaseName, at time.Time) {
+func (s *Session) commitStart(name PhaseName, at time.Time, clock string) {
+	if clock == "" {
+		clock = ClockCollectorLocal
+	}
 	planned, plannedKnown := s.plannedDuration(name)
 	s.started = true
 	s.open = &name
@@ -517,22 +583,26 @@ func (s *Session) commitStart(name PhaseName, at time.Time) {
 		Planned:      planned,
 		PlannedKnown: plannedKnown,
 		StartedAt:    at,
-		Clock:        ClockCollectorLocal,
+		Clock:        clock,
 	})
 }
 
-func (s *Session) recordFinish(name PhaseName, at time.Time) {
+func (s *Session) recordFinish(name PhaseName, at time.Time, clock string) {
 	for i := range s.outcome.Phases {
 		phase := &s.outcome.Phases[i]
 		if phase.Name != name || !phase.FinishedAt.IsZero() {
 			continue
 		}
 		phase.FinishedAt = at
+		intervalClock := phase.Clock
+		if clock != "" && phase.Clock != "" && clock != phase.Clock {
+			intervalClock = ClockUnknown
+		}
 		if name == PhaseMeasured {
 			s.outcome.Measured = &Interval{
 				StartedAt:  phase.StartedAt,
 				FinishedAt: at,
-				Clock:      ClockCollectorLocal,
+				Clock:      intervalClock,
 			}
 		}
 		if rank, ok := phaseRank(name); ok {
@@ -693,6 +763,13 @@ func requiredCapabilities(req Request) []Capability {
 	if req.OnPhase != nil {
 		required = append(required, CapabilityMeasuredPhase)
 	}
+	if req.StrictDirect {
+		required = append(required,
+			CapabilityDirectRouteProof,
+			CapabilityInClusterRunner,
+			CapabilitySelectedPodMetrics,
+		)
+	}
 	return uniqueCapabilities(required)
 }
 
@@ -715,6 +792,15 @@ func joinCapabilities(capabilities []Capability) string {
 		parts[i] = string(capability)
 	}
 	return fmt.Sprint(parts)
+}
+
+func knownPhaseClock(clock string) bool {
+	switch clock {
+	case ClockCollectorLocal, ClockRunner, ClockSource:
+		return true
+	default:
+		return false
+	}
 }
 
 func phaseRank(name PhaseName) (int, bool) {
@@ -740,6 +826,10 @@ func requestedFrom(req Request) RequestedLoad {
 		Phases:           append([]PhasePlan(nil), req.Phases...),
 		LatencySemantics: req.LatencySemantics,
 		Required:         append([]Capability(nil), req.Required...),
+		Target:           req.Target,
+		Route:            req.Route,
+		Runner:           req.Runner,
+		StrictDirect:     req.StrictDirect,
 	}
 }
 

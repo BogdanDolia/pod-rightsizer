@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/HelixThinker/pod-rightsizer/pkg/kubernetes"
+	"github.com/HelixThinker/pod-rightsizer/pkg/metrics"
 )
 
 // Sample is one resource observation. Timestamp and SourceTimestamp are the
@@ -27,6 +28,7 @@ type Sample struct {
 	Workload        kubernetes.WorkloadObservation `json:"workload"`
 	CPUSourcePod    string                         `json:"cpuSourcePod,omitempty"`
 	MemorySourcePod string                         `json:"memorySourcePod,omitempty"`
+	Scope           metrics.Scope                  `json:"scope"`
 }
 
 // Collection is the samples obtained so far. Partial is true when the

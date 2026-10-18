@@ -195,6 +195,7 @@ Run that twice against one process or one container for the baseline repeat. For
 | Task | Owns |
 | --- | --- |
 | T03/T04 | Engine-independent load-provider types, capabilities, common SLO evaluation, and CLI/API orchestration through that interface |
+| T03.1 | Direct-pod target, route, runner, and selected-pod metrics contract. The standalone k6 command in this directory, and a kubectl port-forward, are not that in-cluster experiment |
 | T10 | External unchanged k6 CLI adapter, canonical scenario integration, typed outcome, measured-phase/metrics linkage, and removal of the built-in Go generator/local adapter without a compatibility period or runtime fallback |
 | T12 | Runtime profile, `runtime.json` import, and executable Node.js rules |
 | T14 | Comparison engine, noise policy, and the CI regression verdict |

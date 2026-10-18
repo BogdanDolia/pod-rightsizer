@@ -64,6 +64,39 @@ func TestRunKeepsTypedOutcome(t *testing.T) {
 	if len(events) != 2 || events[0].Edge != contract.EdgeStarted || events[1].Edge != contract.EdgeFinished {
 		t.Fatalf("events = %#v, want measured start and finish", events)
 	}
+	if outcome.Route.Mode != contract.RouteUnknown || outcome.Route.Status != contract.AssuranceUnverified || outcome.Route.Proof.Method != contract.ProofNone {
+		t.Fatalf("legacy route = %#v, want unknown and unverified", outcome.Route)
+	}
+	if outcome.Runner.Identity.Placement != contract.PlacementExternal || outcome.Runner.Identity.Placement == contract.PlacementInCluster {
+		t.Fatalf("legacy placement = %s", outcome.Runner.Identity.Placement)
+	}
+	if outcome.Stop.State != contract.StopConfirmed || !outcome.Stop.InProcess {
+		t.Fatalf("legacy stop = %#v, want an in-process confirmation", outcome.Stop)
+	}
+	if !outcome.Suitability.Usable {
+		t.Fatalf("legacy suitability = %#v, want the existing success", outcome.Suitability)
+	}
+}
+
+func TestStrictDirectDoesNotPromoteLegacyAdapter(t *testing.T) {
+	outcome, err := New().Run(context.Background(), contract.Request{
+		TargetURL:         "http://example.test",
+		Shape:             contract.ShapeRPS,
+		RequestedRPS:      1,
+		RequestedDuration: time.Second,
+		StrictDirect:      true,
+		Route:             contract.RequestedRoute{Mode: contract.RouteDirectPod},
+		Runner:            contract.RequestedRunner{Placement: contract.PlacementInCluster},
+	})
+	if !errors.Is(err, contract.ErrMissingCapability) {
+		t.Fatalf("Run() error = %v, want missing direct capability", err)
+	}
+	if outcome.Executed || outcome.Route.Status == contract.AssuranceVerified || outcome.Route.Mode == contract.RouteDirectPod && outcome.Route.Proof.Method == contract.ProofDirectPod {
+		t.Fatalf("legacy strict request was promoted: %#v", outcome.Route)
+	}
+	if outcome.Runner.Identity.Placement == contract.PlacementInCluster || outcome.Suitability.Usable {
+		t.Fatalf("legacy strict request = placement %s usable %v", outcome.Runner.Identity.Placement, outcome.Suitability.Usable)
+	}
 }
 
 func TestRunRejectsWarmupBeforeStart(t *testing.T) {
